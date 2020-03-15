@@ -1,2 +1,2 @@
-# sisat
-Detect snow and ice on glacier from satellite imagery.
+# glaciersat
+Observe glaciers from satellites.
