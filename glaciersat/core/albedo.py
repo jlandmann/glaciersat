@@ -1,4 +1,8 @@
 import numpy as np
+import xarray as xr
+import pandas as pd
+
+xr.set_options(keep_attrs=True)
 
 
 def get_broadband_albedo_knap(g, nir):
@@ -156,4 +160,22 @@ def get_ensemble_albedo(b, g, r, nir, swir1, swir2):
     a_knap = get_broadband_albedo_knap(g, nir)
     a_liang = get_broadband_albedo_liang(b, r, nir, swir1, swir2)
     a_bonafoni = get_broadband_albedo_bonafoni(b, g, r, nir, swir1, swir2)
-    return np.vstack([a_knap, a_liang, a_bonafoni])
+
+    # return the same type as input
+    if np.array([isinstance(a, np.ndarray) for a in
+                 [a_knap, a_liang, a_bonafoni]]).all():
+        return np.vstack([a_knap, a_liang, a_bonafoni])
+    elif np.array([isinstance(a, xr.DataArray) for a in
+                   [a_knap, a_liang, a_bonafoni]]).all():
+        # minimal coords, since there might be "band" left, for example
+        a_ens = xr.concat([a_knap, a_liang, a_bonafoni],
+                          pd.Index(['knap', 'liang', 'bonafoni'],
+                          name='method'), coords='minimal', compat='override',
+                          combine_attrs='identical')
+        a_ens = a_ens.reset_coords('band', drop=True)
+        return a_ens
+    else:
+        raise ValueError('Data types of the albedo ensemble members are: {}, '
+                         'but allowed are only `xr.DataArray` or `np.array`.'.
+                         format([type(o) for o in [a_knap, a_liang,
+                                                   a_bonafoni]]))
