@@ -2,7 +2,12 @@ import xarray as xr
 import os
 from glob import glob
 import pandas as pd
+import numpy as np
 from glaciersat.core import albedo
+
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class SatelliteImage:
@@ -17,6 +22,7 @@ class S2Image(SatelliteImage):
 
         self.band_names = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07',
                            'B08', 'B09', 'B10', 'B11', 'B12', 'B8A']
+        self.cloud_mask_names = ['CMASK']
         self.bands_names_short = ['ca', 'b', 'g', 'r', 'vre1', 'vre2', 'vre3',
                                   'nir', 'wv', 'swirc', 'swir1', 'swir2',
                                   'nnir']
@@ -34,6 +40,8 @@ class S2Image(SatelliteImage):
 
         # scaling factor (e.g. for albedo computation)
         self.scale_fac = 10000.
+
+        self.grid = None
 
         if (ds is not None) and (safe_path is None):
             if isinstance(ds, xr.Dataset):
@@ -93,20 +101,75 @@ class S2Image(SatelliteImage):
                 bands_open[bi] = bands_open[bi].isel(band=0)
             bands_open[bi] = bands_open[bi].reset_coords('band', drop=True)
 
+        # set grid from first open Dataset
+        random_ds = bands_open[0].to_dataset(name='var', promote_attrs=True)
+        random_ds.attrs['pyproj_srs'] = random_ds.crs.split('=')[1]
+        self.grid = salem.grid_from_dataset(random_ds)
+
         all_bands = xr.concat(bands_open, pd.Index(self.band_names,
                                                    name='band'))
+
+        # pick random file to get a date and expand
+        date = pd.Timestamp(
+            os.path.basename(bpaths[0]).split('_')[1].split('T')[0])
+        all_bands = all_bands.expand_dims(dim='time')
+        all_bands = all_bands.assign_coords(time=(['time'], [date]))
+
         # for salem
         all_bands.attrs['pyproj_srs'] = all_bands.crs.split('=')[1]
+        all_bands.name = 'bands'
+
+        # process cloud mask
+        cm_path = glob(
+            os.path.join(safe_path, '**', '**', '**', 'MSK_CLOUDS_B00.gml'))
+        if len(cm_path) == 0:
+            log.warning('Cloud mask for {} not available.'.format(
+                os.path.basename(safe_path)))
+            all_bands = all_bands.to_dataset(name='bands',
+                                             promote_attrs=True)
+        else:
+            self.cloud_mask = self.get_cloud_mask_from_gml(cm_path[0])
+            cmask_da = xr.DataArray(self.cloud_mask,
+                                    coords=bands_open[0].coords,
+                                    dims=bands_open[0].dims, name='cmask',
+                                    attrs=bands_open[0].attrs)
+            cmask_da = cmask_da.expand_dims(dim='time')
+            cmask_da = cmask_da.assign_coords(time=(['time'], [date]))
+            cmask_da.attrs['pyproj_srs'] = all_bands.crs.split('=')[1]
+            # attrs should be the same anyway, but first has 'pyproj_srs'
+            all_bands = xr.merge([all_bands, cmask_da],
+                                 combine_attrs='no_conflicts')
         return all_bands
+
+    def get_cloud_mask_from_gml(self, cmask_path: str) -> np.ndarray:
+        """
+        Rasterize a Sentinel *.GML cloud mask onto a given grid.
+
+        Parameters
+        ----------
+        cmask_path : str
+            Path to a *.GML file containing a Sentinel cloud mask.
+
+        Returns
+        -------
+        cmask_raster: np.ndarray
+            Cloud mask as a numpy array.
+        """
+
+        cmask = gpd.read_file(cmask_path)
+        cmask_u = cmask.unary_union
+        cmask_raster = self.grid.region_of_interest(geometry=cmask_u,
+                                                    crs=cmask.crs)
+        return cmask_raster
 
     def get_ensemble_albedo(self):
         sf = self.scale_fac
-        return albedo.get_ensemble_albedo(self.data.sel(band='B02') / sf,
-                                          self.data.sel(band='B03') / sf,
-                                          self.data.sel(band='B04') / sf,
-                                          self.data.sel(band='B08') / sf,
-                                          self.data.sel(band='B11') / sf,
-                                          self.data.sel(band='B12') / sf)
+        return albedo.get_ensemble_albedo(self.data.bands.sel(band='B02') / sf,
+                                          self.data.bands.sel(band='B03') / sf,
+                                          self.data.bands.sel(band='B04') / sf,
+                                          self.data.bands.sel(band='B08') / sf,
+                                          self.data.bands.sel(band='B11') / sf,
+                                          self.data.bands.sel(band='B12') / sf)
 
 
 class LandsatImage(SatelliteImage):
