@@ -59,17 +59,19 @@ class S2Image(SatelliteImage):
         else:
             raise ValueError('Value for `ds` and/or `safe_path` not accepted.')
 
-    def from_safe_format(self, safe_path):
+    def from_safe_format(self, safe_path: str) -> xr.DataArray:
         """
         Generate class from .SAFE format.
 
         Parameters
         ----------
-        safe_path :
+        safe_path : str
+            Path to a folder in *.SAFE format.
 
         Returns
         -------
-
+        all_bands: xr.DataArray
+            An xarray DataArray with all bands.
         """
 
         # check if we want to unzip
