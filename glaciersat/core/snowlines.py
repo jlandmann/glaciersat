@@ -152,12 +152,7 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
     out_ds = out_ds.rename('snow')
 
     # primary surface type evaluation: 1=snow, 0=ice, 0.5=ambiguous
-    # nsat = cfg.PARAMS['naegeli_snow_alpha_thresh']
-    # niat = cfg.PARAMS['naegeli_ice_alpha_thresh']
-    # todo: replace with cfg values
-    out_ds = out_ds.where(out_ds <= 0.55, 1.)  # snow
-    out_ds = out_ds.where(out_ds >= 0.2, 0.)  # ice
-    out_ds = out_ds.where((out_ds < 0.2) | (out_ds > 0.55), 0.5)  # ambiguous
+    out_ds = primary_surface_type_evaluation(out_ds)
 
     # only proceed if ambiguous area contains any True values
     if (out_ds == 0.5).any():
@@ -186,6 +181,46 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
             (out_ds != 0.5) & (dem > (sla - r_crit)) | np.isnan(dem), 0.)
 
     return out_ds
+
+
+def primary_surface_type_evaluation(alpha_ds: xr.DataArray or xr.Dataset) -> \
+        xr.DataArray or xr.Dataset:
+    """
+    Do a primary surface type evaluation after Naegeli et al. (2019) [1]_.
+
+    Based on given albedo thresholds, this algorithm assigns 0 to all pixels
+    which are believed to be for certain ice, 1 to those believed to be for
+    sure snow, and 0.5 in the so called 'ambiguous range'.
+
+    Parameters
+    ----------
+    alpha_ds : xr. DataArray or xr.Dataset
+        Xarray data structure containing broadband albedo.
+
+    Returns
+    -------
+    alpha_ds: same as input
+        Data structure containing classified albedo.
+
+    References
+    ----------
+    .. [1] Naegeli, K.; Huss, M. & Hoelzle, M.: Change detection of bare-ice
+        albedo in the Swiss Alps. The Cryosphere, 2019, 13, 397-412.
+    """
+
+    sat = cfg.PARAMS['naegeli_snow_alpha_thresh']
+    iat = cfg.PARAMS['naegeli_ice_alpha_thresh']
+
+    # we also preserve NaNs (they are in the masked region)
+    # snow
+    alpha_ds = alpha_ds.where((alpha_ds <= sat) | np.isnan(alpha_ds), 1.)
+    # ice
+    alpha_ds = alpha_ds.where((alpha_ds >= iat) | np.isnan(alpha_ds), 0.)
+    # ambiguous
+    alpha_ds = alpha_ds.where((alpha_ds < iat) | (alpha_ds > sat) |
+                              np.isnan(alpha_ds), 0.5)
+
+    return alpha_ds
 
 
 def _find_max_albedo_slope_naegeli(alpha_amb: xr.Dataset, dem_amb: xr.Dataset,
