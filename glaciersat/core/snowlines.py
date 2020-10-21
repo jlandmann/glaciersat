@@ -1,3 +1,4 @@
+import glaciersat.cfg as cfg
 import xarray as xr
 from skimage import filters
 import logging
@@ -66,9 +67,9 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
 
     if 'cmask' in ds.data_vars:
         cmask = ds.cmask.values.copy()
-        # todo: replace threshold 0. with cfg.PARAMS['cloud_prob_thresh']
-        cmask[cmask > 0.] = np.nan
-        cmask[cmask <= 0.] = 1.
+        cprob_thresh = cfg.PARAMS['cloud_prob_thresh']
+        cmask[cmask > cprob_thresh] = np.nan
+        cmask[cmask <= cprob_thresh] = 1.
         assert cmask.ndim <= 2
         nir *= cmask
     else:
@@ -80,9 +81,7 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
 
     # if too much cloud cover, don't analyze at all
     cloud_cov_ratio = 1 - (np.sum(~np.isnan(nir)) / n_tot_pix)
-    # todo: if cloud_cov_ratio <= cfg.PARAMS['max_cloud_cover_ratio']:
-    print(cloud_cov_ratio)
-    if cloud_cov_ratio <= 0.2:
+    if cloud_cov_ratio <= cfg.PARAMS['max_cloud_cover_ratio']:
         val = filters.threshold_otsu(nir[~np.isnan(nir)])
         snow = nir > val
         snow = snow * 1.
@@ -212,8 +211,7 @@ def _find_max_albedo_slope_naegeli(alpha_amb: xr.Dataset, dem_amb: xr.Dataset,
     """
 
     if bin_width is None:
-        # bin_width = cfg.PARAMS['bin_width']
-        bin_width = 20
+        bin_width = cfg.PARAMS['bin_width']
 
     # 1) reclassify elevation into bins
     # todo: now we take the overall mean, it should probably done by method
