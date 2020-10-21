@@ -173,6 +173,7 @@ def get_ensemble_albedo(b, g, r, nir, swir1, swir2):
                           name='method'), coords='minimal', compat='override',
                           combine_attrs='identical')
         a_ens = a_ens.reset_coords('band', drop=True)
+        a_ens = a_ens.to_dataset(name='albedo', promote_attrs=True)
         return a_ens
     else:
         raise ValueError('Data types of the albedo ensemble members are: {}, '
