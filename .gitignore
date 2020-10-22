@@ -68,6 +68,7 @@ docs/_build/
 docs/_static
 docs/_templates
 docs/_generated
+docs/make.bat
 
 # PyCharm stuff:
 .idea/
