@@ -93,7 +93,9 @@ def crop_sat_image_to_glacier(ds: xr.Dataset, gdir_candidates: list = None,
             if os.path.exists(fp):
                 with xr.open_dataset(fp) as exist:
                     exist.load()
-                    ds_total = exist.update(ds_glacier)
+                    ds_total = xr.merge([exist, ds_glacier],
+                                        combine_attrs='no_conflicts',
+                                        compat='override')
                 ds_total.to_netcdf(fp)
             else:
                 ds_glacier.to_netcdf(fp)
