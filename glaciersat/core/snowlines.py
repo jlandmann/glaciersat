@@ -55,6 +55,9 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
             ds = ds.sel(time=date)
         except (ValueError, KeyError):  # dimension or date not present
             pass
+    else:  # if only one time, we can safely select it
+        if ('time' in ds.coords) and (len(ds.coords['time']) == 1):
+            ds = ds.isel(time=0)
 
     if roi_shp is not None:
         ds = ds.salem.roi(shape=roi_shp)
@@ -175,6 +178,16 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
     else:
         # take the latest DEM
         dem = dem.isel(time=-1).height.values
+
+    if 'cmask' in ds.data_vars:
+        cmask = ds.cmask.values.copy()
+        cprob_thresh = cfg.PARAMS['cloud_prob_thresh']
+        cmask[cmask > cprob_thresh] = np.nan
+        cmask[cmask <= cprob_thresh] = 1.
+        ds *= cmask
+    else:
+        log.warning('No cloud mask information given. Still proceeding and '
+                    'pretending a cloud-free scene...')
 
     albedo = ds.albedo
     if roi_shp is not None:
