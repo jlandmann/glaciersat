@@ -235,9 +235,14 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
             # stupid, but true: this is double work we wanted to avoid
             merged = xr.merge([albedo_amb, dem_amb])
             bw = cfg.PARAMS['bin_width']
-            aab = merged.groupby_bins('height', np.arange(np.nanmin(dem_amb),
-                                                          np.nanmax(dem_amb),
-                                                          bw)).mean()
+            aab = merged.groupby_bins('height',
+                                      np.arange(np.nanmin(dem_amb),
+                                                np.nanmax(dem_amb),
+                                                bw)).mean(skipna=True)
+
+            # interpolate NaNs linearly (can happen with detached ambig. areas)
+            aab = aab.interpolate_na(dim='height_bins', use_coordinate=False)
+
             alpha_in = aab.alpha.values
             height_in = aab.height.values
             r_squared = get_model_fit_r_squared(
