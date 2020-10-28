@@ -91,14 +91,16 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
 
     # if too much cloud cover, don't analyze at all
     cloud_cov_ratio = 1 - (np.sum(~np.isnan(nir)) / n_tot_pix)
-    if cloud_cov_ratio <= cfg.PARAMS['max_cloud_cover_ratio']:
+    if (cloud_cov_ratio <= cfg.PARAMS['max_cloud_cover_ratio']) or \
+            (n_tot_pix == 0.):
         val = filters.threshold_otsu(nir[~np.isnan(nir)])
         snow = nir > val
         snow = snow * 1.
         snow[np.isnan(nir)] = np.nan
     else:
-        log.error('Masked pixed ratio of the glacier is too high to analyze '
-                  'snow cover.')
+        log.error('Masked pixel ratio {:.2f} of the glacier is higher than the'
+                  ' chosen threshold max_cloud_cover_ratio to analyze snow '
+                  'cover.'.format(cloud_cov_ratio))
         snow = np.full_like(nir, np.nan)
 
     snow_da = xr.DataArray(data=snow, coords={'y': ds.coords['y'],
@@ -197,8 +199,22 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
 
     if roi_shp is not None:
         albedo = albedo.salem.roi(shape=roi_shp)
+
     out_ds = albedo.copy(deep=True)
     out_ds = out_ds.rename('snow')
+
+    # check for cloud cover
+    n_tot_pix = np.sum(~np.isnan(albedo)) / len(albedo)
+    # if too much cloud cover, don't analyze at all
+    cloud_cov_ratio = 1 - (np.sum(~np.isnan(albedo)) / n_tot_pix)
+    if (cloud_cov_ratio > cfg.PARAMS['max_cloud_cover_ratio']) or \
+            (n_tot_pix == 0.):
+        log.error('Masked pixel ratio of the glacier is higher than the '
+                  'chosen threshold max_cloud_cover_ratio to analyze snow '
+                  'cover.')
+        out_ds[:] = np.nan
+        return out_ds
+
 
     # primary surface type evaluation: 1=snow, 0=ice, 0.5=ambiguous
     out_ds = primary_surface_type_evaluation(out_ds)
