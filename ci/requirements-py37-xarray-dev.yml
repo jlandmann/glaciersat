@@ -17,6 +17,7 @@ dependencies:
   - scipy
   - matplotlib
   - configobj
+  - scikit-image
   - pip
   - pip:
       - git+https://github.com/pydata/xarray.git
