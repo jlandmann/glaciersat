@@ -182,9 +182,21 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
 
     if date is not None:
         dem = dem.sel(time=date, method="nearest").height.values
+        try:
+            ds = ds.sel(time=date)
+        except ValueError:  # dimension not present
+            pass
     else:
         # take the latest DEM
         dem = dem.isel(time=-1).height.values
+        
+        if ('time' in ds.coords) and (len(ds.coords['time']) == 1):
+            ds = ds.isel(time=0)
+        elif ('time' in ds.coords) and (len(ds.coords['time']) != 1):
+            raise ValueError('A valid time step must be selected when working '
+                             'with multitemporal data.')
+        else:  # time not in coords
+            pass
 
     albedo = ds.albedo
     if 'cmask' in ds.data_vars:
