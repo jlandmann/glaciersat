@@ -179,17 +179,17 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
         # take the latest DEM
         dem = dem.isel(time=-1).height.values
 
+    albedo = ds.albedo
     if 'cmask' in ds.data_vars:
         cmask = ds.cmask.values.copy()
         cprob_thresh = cfg.PARAMS['cloud_prob_thresh']
         cmask[cmask > cprob_thresh] = np.nan
         cmask[cmask <= cprob_thresh] = 1.
-        ds *= cmask
+        albedo *= cmask
     else:
         log.warning('No cloud mask information given. Still proceeding and '
                     'pretending a cloud-free scene...')
 
-    albedo = ds.albedo
     if roi_shp is not None:
         albedo = albedo.salem.roi(shape=roi_shp)
     out_ds = albedo.copy(deep=True)
