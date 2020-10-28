@@ -53,11 +53,16 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
     if date is not None:
         try:
             ds = ds.sel(time=date)
-        except (ValueError, KeyError):  # dimension or date not present
+        except ValueError:  # dimension not present
             pass
     else:  # if only one time, we can safely select it
         if ('time' in ds.coords) and (len(ds.coords['time']) == 1):
             ds = ds.isel(time=0)
+        elif ('time' in ds.coords) and (len(ds.coords['time']) != 1):
+            raise ValueError('A valid time step must be selected when working '
+                             'with multitemporal data.')
+        else:  # time not in coords
+            pass
 
     if roi_shp is not None:
         ds = ds.salem.roi(shape=roi_shp)
