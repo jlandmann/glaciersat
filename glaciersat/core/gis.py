@@ -80,8 +80,10 @@ def crop_sat_image_to_glacier(ds: xr.Dataset, gdir_candidates: list = None,
             gi = gdir_candidates[i]
             if gi.has_file('sat_images'):
                 with xr.open_dataset(gi.get_filepath('sat_images')) as exist:
+                    exist.load()
                     ds_total = xr.merge([exist, ds_glacier],
-                                        combine_attrs='identical')
+                                        combine_attrs='no_conflicts',
+                                        compat='override')
                 ds_total.to_netcdf(gi.get_filepath('sat_images'))
             else:
                 ds_glacier.to_netcdf(gi.get_filepath('sat_images'))
@@ -90,8 +92,8 @@ def crop_sat_image_to_glacier(ds: xr.Dataset, gdir_candidates: list = None,
             fp = os.path.join(gi, 'sat_images.nc')
             if os.path.exists(fp):
                 with xr.open_dataset(fp) as exist:
-                    ds_total = xr.merge([exist, ds_glacier],
-                                        combine_attrs='identical')
+                    exist.load()
+                    ds_total = exist.update(ds_glacier)
                 ds_total.to_netcdf(fp)
             else:
                 ds_glacier.to_netcdf(fp)
