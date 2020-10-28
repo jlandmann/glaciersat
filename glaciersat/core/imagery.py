@@ -2,7 +2,9 @@ import xarray as xr
 import os
 from glob import glob
 import pandas as pd
+import salem
 import numpy as np
+import geopandas as gpd
 from glaciersat.core import albedo
 
 import logging
@@ -141,6 +143,10 @@ class S2Image(SatelliteImage):
             # attrs should be the same anyway, but first has 'pyproj_srs'
             all_bands = xr.merge([all_bands, cmask_da],
                                  combine_attrs='no_conflicts')
+
+        # for saving later
+        all_bands.encoding['zlib'] = True
+
         return all_bands
 
     def get_cloud_mask_from_gml(self, cmask_path: str) -> np.ndarray:
