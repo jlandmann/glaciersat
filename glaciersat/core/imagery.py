@@ -57,6 +57,29 @@ class SatelliteImage:
         self.sensor = None
         self.platform = None
         self.scene_footprint = None
+        self.cloud_mask = None
+
+    def __repr__(self):
+
+        summary = ['<glaciersat.core.imagery.SatelliteImage>']
+        if self.sensor is not None:
+            summary += ['  Sensor: ' + self.sensor]
+        if self.platform is not None:
+            summary += ['  Platform: ' + self.platform]
+        if self.scene_footprint is not None:
+            summary += ['  Footprint: ' + 'True']
+        else:
+            summary += ['  Footprint: ' + 'False']
+        if self.cloud_mask is not None:
+            summary += ['  Cloud Mask: ' + 'True']
+        else:
+            summary += ['  Cloud Mask: ' + 'False']
+        if self.data is not None:
+            summary += ['  Data: ' + self.data.__repr__()]
+        if self.path is not None:
+            summary += ['  Origin Path: ' + self.path]
+
+        return '\n'.join(summary) + '\n'
 
     def get_scene_footprint(self, fp_path):
         """
