@@ -244,6 +244,11 @@ class S2Image(SatelliteImage):
         all_bands.attrs['pyproj_srs'] = all_bands.crs.split('=')[1]
         all_bands.name = 'bands'
 
+        # save disk space when writing later
+        all_bands.encoding.update(
+            {'dtype': 'int16', 'scale_factor': 1e-5, '_FillValue': -9999,
+             'zlib': True})
+
         # process cloud mask
         cm_path = glob(
             os.path.join(safe_path, '**', '**', '**', 'MSK_CLOUDS_B00.gml'))
@@ -258,6 +263,10 @@ class S2Image(SatelliteImage):
                                     coords=bands_open[0].coords,
                                     dims=bands_open[0].dims, name='cmask',
                                     attrs=bands_open[0].attrs)
+            # save disk when writing later
+            cmask_da.encoding.update(
+                {'dtype': 'int8', 'scale_factor': 0.01, '_FillValue': -9999,
+                 'zlib': True})
             cmask_da = cmask_da.expand_dims(dim='time')
             cmask_da = cmask_da.assign_coords(time=(['time'], [date]))
             cmask_da.attrs['pyproj_srs'] = all_bands.crs.split('=')[1]
@@ -274,9 +283,6 @@ class S2Image(SatelliteImage):
                 os.path.basename(safe_path)))
         else:
             self.get_scene_footprint(sf_path[0])
-
-        # for saving later
-        all_bands.encoding['zlib'] = True
 
         return all_bands
 
