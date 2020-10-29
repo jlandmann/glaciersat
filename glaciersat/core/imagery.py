@@ -34,6 +34,46 @@ class SatelliteImage:
         """
         raise NotImplementedError
 
+    def overlaps_shape(self, shape, percentage=100.):
+        """
+        Check if the satellite image overlaps a shape by a given percentage.
+
+        Parameters
+        ----------
+        shape: str od gpd.GeoDataFrame
+             Path to shapefile or geopandas.GeoDataFrame for region of
+             interest, e.g. a glacier outline.
+        percentage : float, optional
+             Percentage of `shape` that should intersect the satellite image
+             scene footprint. Default: 100. (satellite image has to **contain**
+             `shape` fully)
+
+        Returns
+        -------
+        overlap_bool: bool
+            Whether or not the scene footprint contains the given percentage of
+            the shape.
+        """
+        if isinstance(shape, str):
+            shape = salem.read_shapefile(shape)
+
+        ratio = percentage / 100.
+        if ratio == 1.:
+            overlap_bool = self.scene_footprint.contains(
+                shape.to_crs(self.scene_footprint.crs)).item()
+        elif 0. < ratio < 1.:
+            shape_reproj = shape.to_crs(self.scene_footprint.crs)
+            shape_area = shape_reproj.area.item()
+            intsct_area = self.scene_footprint.intersection(
+                shape_reproj).area.item()
+            if (intsct_area / shape_area) >= ratio:
+                overlap_bool = True
+            else:
+                overlap_bool = False
+        else:
+            raise ValueError("Overlap percentage must be between 0 und 100.")
+
+        return overlap_bool
 
 
 class S2Image(SatelliteImage):
