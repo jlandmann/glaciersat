@@ -13,8 +13,27 @@ log = logging.getLogger(__name__)
 
 
 class SatelliteImage:
+
     def __init__(self):
-        pass
+        self.sensor = None
+        self.platform = None
+        self.scene_footprint = None
+
+    def get_scene_footprint(self, fp_path):
+        """
+        Get and unify a scene footprint geometry file.
+
+        Parameters
+        ----------
+        fp_path : str
+            Path to a file containing a scene footprint.
+
+        Returns
+        -------
+        None
+        """
+        raise NotImplementedError
+
 
 
 class S2Image(SatelliteImage):
@@ -144,6 +163,16 @@ class S2Image(SatelliteImage):
             all_bands = xr.merge([all_bands, cmask_da],
                                  combine_attrs='no_conflicts')
 
+        # process scene footprint
+        # todo: we take B01 as representative for all others: ok?
+        sf_path = glob(
+            os.path.join(safe_path, '**', '**', '**', 'MSK_DETFOO_B01.gml'))
+        if len(sf_path) == 0:
+            log.warning('Scene footprint for {} not available.'.format(
+                os.path.basename(safe_path)))
+        else:
+            self.get_scene_footprint(sf_path[0])
+
         # for saving later
         all_bands.encoding['zlib'] = True
 
@@ -174,6 +203,25 @@ class S2Image(SatelliteImage):
         cmask_raster = self.grid.region_of_interest(geometry=cmask_u,
                                                     crs=cmask.crs)
         return cmask_raster
+
+    def get_scene_footprint(self, fp_path: str) -> None:
+        """
+        Get and unify a Sentinel *.GML scene footprint.
+
+        Parameters
+        ----------
+        fp_path : str
+            Path to a *.GML file containing a Sentinel scene footprint.
+
+        Returns
+        -------
+        None
+        """
+        fp = gpd.read_file(fp_path)
+        fp_union = fp.unary_union
+        fp_gdf = gpd.GeoSeries(fp_union, crs=fp.crs)
+
+        self.scene_footprint = fp_gdf
 
     def get_ensemble_albedo(self):
         sf = self.scale_fac
