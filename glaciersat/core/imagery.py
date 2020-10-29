@@ -163,8 +163,13 @@ class S2Image(SatelliteImage):
         cmask_raster: np.ndarray
             Cloud mask as a numpy array.
         """
+        try:
+            cmask = gpd.read_file(cmask_path)
+        except ValueError:  # Fiona ValueError: Null layer: '' when empty
+            # assume no clouds then (mask of Zeros)
+            cmask_raster = self.grid.region_of_interest()
+            return cmask_raster
 
-        cmask = gpd.read_file(cmask_path)
         cmask_u = cmask.unary_union
         cmask_raster = self.grid.region_of_interest(geometry=cmask_u,
                                                     crs=cmask.crs)
