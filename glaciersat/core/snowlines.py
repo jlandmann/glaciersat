@@ -91,17 +91,17 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
 
     # if too much cloud cover, don't analyze at all
     cloud_cov_ratio = 1 - (np.sum(~np.isnan(nir)) / n_tot_pix)
-    if (cloud_cov_ratio <= cfg.PARAMS['max_cloud_cover_ratio']) or \
+    if (cloud_cov_ratio > cfg.PARAMS['max_cloud_cover_ratio']) or \
             (n_tot_pix == 0.):
-        val = filters.threshold_otsu(nir[~np.isnan(nir)])
-        snow = nir > val
-        snow = snow * 1.
-        snow[np.isnan(nir)] = np.nan
-    else:
         log.error('Masked pixel ratio {:.2f} of the glacier is higher than the'
                   ' chosen threshold max_cloud_cover_ratio to analyze snow '
                   'cover.'.format(cloud_cov_ratio))
         snow = np.full_like(nir, np.nan)
+    else:
+        val = filters.threshold_otsu(nir[~np.isnan(nir)])
+        snow = nir > val
+        snow = snow * 1.
+        snow[np.isnan(nir)] = np.nan
 
     snow_da = xr.DataArray(data=snow, coords={'y': ds.coords['y'],
                                               'x': ds.coords['x']},
@@ -189,7 +189,7 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
     else:
         # take the latest DEM
         dem = dem.isel(time=-1).height.values
-        
+
         if ('time' in ds.coords) and (len(ds.coords['time']) == 1):
             ds = ds.isel(time=0)
         elif ('time' in ds.coords) and (len(ds.coords['time']) != 1):
