@@ -13,8 +13,47 @@ log = logging.getLogger(__name__)
 
 
 class SatelliteImage:
+    """
+    Base class for satellite images.
 
-    def __init__(self):
+    Attributes
+    ----------
+    data. xr.Dataset
+        Dataset holding the image values.
+    path: str
+        Path where the data originate from.
+    sensor: str
+        Sensor that has acquired the image.
+    platform: str
+        Platform on which the recording sensor is mounted.
+    scene_footprint: geopandas.GeoSeries
+        Footprint geometry of the image. This makes it easier, for example, to
+        check whether an object of interest intersects with with the image.
+
+    Parameters
+    ----------
+    ds: xr.Dataset or None
+        The dataset to construct the class from. If `None`, then the class is
+        tried to be constructed from `path`. This is why `ds` is mutually
+        exclusive with `path`. Default: None.
+    path: str or None
+        The path to the directory to construct the class from. If `None`, then
+        the class is tried to be constructed from `ds`. This is why `path` is
+        mutually exclusive with `ds`. Default: None.
+    """
+
+    def __init__(self, ds=None, path=None):
+
+        if ds is not None:
+            self.data = ds
+        else:
+            self.data = None
+
+        if path is not None:
+            self.path = path
+        else:
+            self.path = None
+
         self.sensor = None
         self.platform = None
         self.scene_footprint = None
@@ -79,7 +118,7 @@ class SatelliteImage:
 class S2Image(SatelliteImage):
 
     def __init__(self, ds=None, safe_path=None):
-        super().__init__()
+        super().__init__(ds=ds, path=safe_path)
 
         self.band_names = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07',
                            'B08', 'B09', 'B10', 'B11', 'B12', 'B8A']
@@ -263,14 +302,41 @@ class S2Image(SatelliteImage):
 
         self.scene_footprint = fp_gdf
 
-    def get_ensemble_albedo(self):
+    def get_ensemble_albedo(self, return_ds: bool = False) -> \
+            xr.Dataset or SatelliteImage:
+        """
+        Get an ensemble albedo of the satellite reflectances using three
+        methods.
+
+        Parameters
+        ----------
+        return_ds : bool, optional
+            Whether to return the `xarray.Dataset` (True), or a
+            `SatelliteImage` instance. The latter also has the footprint as an
+            attribute, which is useful for further processing. Default: False
+            (return `SatelliteImage`).
+
+        Returns
+        -------
+        alpha_ens: xr.Dataset or glaciersat.core.imagery.SatelliteImage
+            Ensemble albedo object, depending on the value of `return_ds`.
+        """
         sf = self.scale_fac
-        return albedo.get_ensemble_albedo(self.data.bands.sel(band='B02') / sf,
-                                          self.data.bands.sel(band='B03') / sf,
-                                          self.data.bands.sel(band='B04') / sf,
-                                          self.data.bands.sel(band='B08') / sf,
-                                          self.data.bands.sel(band='B11') / sf,
-                                          self.data.bands.sel(band='B12') / sf)
+        alpha_ens = albedo.get_ensemble_albedo(
+            self.data.bands.sel(band='B02') / sf,
+            self.data.bands.sel(band='B03') / sf,
+            self.data.bands.sel(band='B04') / sf,
+            self.data.bands.sel(band='B08') / sf,
+            self.data.bands.sel(band='B11') / sf,
+            self.data.bands.sel(band='B12') / sf)
+        alpha_ens = xr.merge([alpha_ens, self.data.cmask],
+                             combine_attrs='no_conflicts')
+        if return_ds is True:
+            return alpha_ens
+        else:
+            alpha_ens = SatelliteImage(alpha_ens)
+            alpha_ens.scene_footprint = self.scene_footprint.copy(deep=True)
+            return alpha_ens
 
 
 class LandsatImage(SatelliteImage):
