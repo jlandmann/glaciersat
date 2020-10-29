@@ -2,6 +2,11 @@ import xarray as xr
 import salem
 import os
 import pandas as pd
+import numpy as np
+from glaciersat.core import imagery
+
+import logging
+log = logging.getLogger(__file__)
 
 
 def rasterize_shape(shp, resolution):
@@ -27,15 +32,18 @@ def rasterize_shape(shp, resolution):
     #mask_all_touched = grid.region_of_interest(shape=, all_touched=True)
 
 
-def crop_sat_image_to_glacier(ds: xr.Dataset, gdir_candidates: list = None,
-                              out_dirs: list = None, grids: list = None):
+def crop_sat_image_to_glacier(ds: xr.Dataset or imagery.SatelliteImage,
+                              gdir_candidates: list = None,
+                              out_dirs: list = None, grids: list = None,
+                              min_overlap: float = 100.,
+                              shapes: list or None = None) -> None:
     """
     Crop a satellite image into glacier domains and append to existing images.
 
     Parameters
     ----------
-    ds : xr.Dataset
-        Dataset containing the satellite image.
+    ds : xr.Dataset or glaciersat.core.imagery.SatelliteImage
+        Object containing the satellite image.
     gdir_candidates: list of GlacierDirectories, optional
         List with potential GlacierDirectories that might be included in the
         scene. Mutually exclusive with `grids`. Default: None.
@@ -45,6 +53,14 @@ def crop_sat_image_to_glacier(ds: xr.Dataset, gdir_candidates: list = None,
     grids: list of `salem.Grid`s, optional
         List with salem.Grids defining a glacier region to which the data shall
         be clipped. Mutually exclusive with `gdir_candidates`. Default: None.
+    min_overlap: float
+        Minimum overlap percentage of satellite image and glacier. Default:
+        100. (glacier must be contained fully in satellite image footprint).
+    shapes: list or None, optional
+        List of paths to shapes of glaciers. Must be in the same order like
+        `gdir_candidates`or `grids`, respectively. If `None`and
+        `gdir_candidates` is given, shapes will be retrieved from the outlines
+        in the glacier directory. Default: None.
 
     Returns
     -------
@@ -63,8 +79,33 @@ def crop_sat_image_to_glacier(ds: xr.Dataset, gdir_candidates: list = None,
     else:
         pass
 
+    if (shapes is None) and (gdir_candidates is not None):
+        shapes = [gdir_candidates[i].get_filepath('outlines') for i in
+                  range(len(gdir_candidates))]
+
+    # cheap way to pre-assess whether given glacier is in the image at all
+    if callable(getattr(ds, 'overlaps_shape', None)) and (shapes is not None):
+        cand_in_img = [ds.overlaps_shape(i, percentage=min_overlap) for i in
+                       shapes]
+        if np.array(cand_in_img).any() is False:  # no intersection at all
+            log.info(
+                'No intersection of the satellite image and the supplied grids'
+                ' at the given level ({}%) at all.'.format(min_overlap))
+            return
+    else:  # postpone to next step (more expensive)
+        cand_in_img = None
+
+    # we need to load for this operation
+    if not isinstance(ds, (xr.Dataset, xr.DataArray)):
+        ds = ds.data
+
     ds.load()
+
     for i, grid in enumerate(grids):
+
+        if (cand_in_img is not None) and (cand_in_img[i] is False):
+            continue
+
         grid_ds = grid.to_dataset()
         if not isinstance(ds, xr.Dataset):
             ds = ds.to_dataset(name='albedo', promote_attrs=True)
