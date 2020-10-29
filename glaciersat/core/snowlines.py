@@ -66,7 +66,6 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
 
     if roi_shp is not None:
         ds = ds.salem.roi(shape=roi_shp)
-    n_tot_pix = np.sum(~np.isnan(ds.bands)) / len(ds.bands)
 
     # todo: is it possible to make this a probabilistic snow map?
     try:
@@ -77,6 +76,9 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
 
     if 'cmask' in ds.data_vars:
         cmask = ds.cmask.values.copy()
+        # cmask already masked to glacier ROI
+        cloud_cov_ratio = np.nansum(ds.cmask.values) / np.sum(
+            ~np.isnan(ds.cmask.values))
         cprob_thresh = cfg.PARAMS['cloud_prob_thresh']
         cmask[cmask > cprob_thresh] = np.nan
         cmask[cmask <= cprob_thresh] = 1.
@@ -89,13 +91,14 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
     # make sure we only work on 1 time step, otherwise next cond. doesn't work
     assert nir.ndim <= 2
 
+    n_valid_pix = np.sum(~np.isnan(nir))
+
     # if too much cloud cover, don't analyze at all
-    cloud_cov_ratio = 1 - (np.sum(~np.isnan(nir)) / n_tot_pix)
     if (cloud_cov_ratio > cfg.PARAMS['max_cloud_cover_ratio']) or \
-            (n_tot_pix == 0.):
-        log.error('Masked pixel ratio {:.2f} of the glacier is higher than the'
-                  ' chosen threshold max_cloud_cover_ratio to analyze snow '
-                  'cover.'.format(cloud_cov_ratio))
+            (n_valid_pix == 0.):
+        log.error('Masked pixel ratio {:.2f} is higher than the chosen '
+                  'threshold max_cloud_cover_ratio or glacier contains only '
+                  'NaN.'.format(cloud_cov_ratio))
         snow = np.full_like(nir, np.nan)
     else:
         val = filters.threshold_otsu(nir[~np.isnan(nir)])
@@ -198,35 +201,37 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
         else:  # time not in coords
             pass
 
+    if roi_shp is not None:
+        ds = ds.salem.roi(shape=roi_shp)
+
     albedo = ds.albedo
     if 'cmask' in ds.data_vars:
         cmask = ds.cmask.values.copy()
+        # cmask already masked to glacier ROI
+        cloud_cov_ratio = np.nansum(ds.cmask.values) / np.sum(
+            ~np.isnan(ds.cmask.values))
         cprob_thresh = cfg.PARAMS['cloud_prob_thresh']
         cmask[cmask > cprob_thresh] = np.nan
         cmask[cmask <= cprob_thresh] = 1.
-        albedo *= cmask
     else:
+        cmask = np.ones_like(albedo.isel(broadband=0))
         log.warning('No cloud mask information given. Still proceeding and '
                     'pretending a cloud-free scene...')
 
-    if roi_shp is not None:
-        albedo = albedo.salem.roi(shape=roi_shp)
+    albedo *= cmask
+    n_valid_pix = np.sum(~np.isnan(albedo))
 
     out_ds = albedo.copy(deep=True)
     out_ds = out_ds.rename('snow')
 
-    # check for cloud cover
-    n_tot_pix = np.sum(~np.isnan(albedo)) / len(albedo)
     # if too much cloud cover, don't analyze at all
-    cloud_cov_ratio = 1 - (np.sum(~np.isnan(albedo)) / n_tot_pix)
-    if (cloud_cov_ratio > cfg.PARAMS['max_cloud_cover_ratio']) or \
-            (n_tot_pix == 0.):
-        log.error('Masked pixel ratio of the glacier is higher than the '
-                  'chosen threshold max_cloud_cover_ratio to analyze snow '
-                  'cover.')
+    if (cloud_cov_ratio > cfg.PARAMS['max_cloud_cover_ratio']) or (
+            n_valid_pix == 0.):
+        log.error('Masked pixel ratio {:.2f} is higher than the chosen '
+                  'threshold max_cloud_cover_ratio or glacier contains only '
+                  'NaN.'.format(cloud_cov_ratio))
         out_ds[:] = np.nan
         return out_ds
-
 
     # primary surface type evaluation: 1=snow, 0=ice, 0.5=ambiguous
     out_ds = primary_surface_type_evaluation(out_ds)
