@@ -360,11 +360,17 @@ class S2Image(SatelliteImage):
             self.data.bands.sel(band='B12') / sf)
         alpha_ens = xr.merge([alpha_ens, self.data.cmask],
                              combine_attrs='no_conflicts')
+        # save disk space when writing later
+        alpha_ens.albedo.encoding.update(
+            {'dtype': 'int16', 'scale_factor': 0.0001, '_FillValue': -9999,
+             'zlib': True})
         if return_ds is True:
             return alpha_ens
         else:
             alpha_ens = SatelliteImage(alpha_ens)
             alpha_ens.scene_footprint = self.scene_footprint.copy(deep=True)
+            alpha_ens.cloud_mask = self.cloud_mask.copy()
+            alpha_ens.path = self.path
             return alpha_ens
 
 
