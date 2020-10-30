@@ -170,8 +170,8 @@ def get_ensemble_albedo(b, g, r, nir, swir1, swir2):
         # minimal coords, since there might be "band" left, for example
         a_ens = xr.concat([a_knap, a_liang, a_bonafoni],
                           pd.Index(['knap', 'liang', 'bonafoni'],
-                          name='method'), coords='minimal', compat='override',
-                          combine_attrs='identical')
+                          name='broadband'), coords='minimal',
+                          compat='override', combine_attrs='identical')
         a_ens = a_ens.reset_coords('band', drop=True)
         a_ens = a_ens.to_dataset(name='albedo', promote_attrs=True)
         return a_ens
