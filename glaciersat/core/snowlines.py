@@ -114,6 +114,9 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
         snow_da = snow_da.expand_dims(dim='time')
         snow_da = snow_da.assign_coords(time=(['time'], [date]))
 
+    snow_da = snow_da.expand_dims(dim='map_method')
+    snow_da = snow_da.assign_coords(map_method=(['map_method'], ['asmag']))
+
     return snow_da
 
 
@@ -321,6 +324,10 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
     if date is not None:
         out_ds = out_ds.expand_dims(dim='time')
         out_ds = out_ds.assign_coords(time=(['time'], [date]))
+
+    mmethod_name = 'naegeli_alt' if alternate is True else 'naegeli'
+    out_ds = out_ds.expand_dims(dim='map_method')
+    out_ds = out_ds.assign_coords(map_method=(['map_method'], [mmethod_name]))
 
     return out_ds
 
