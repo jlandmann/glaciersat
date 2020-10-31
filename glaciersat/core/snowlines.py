@@ -283,7 +283,13 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
                                                 bw)).mean(skipna=True)
 
             # interpolate NaNs linearly (can happen with detached ambig. areas)
-            aab = aab.interpolate_na(dim='height_bins', use_coordinate=False)
+            aab = aab.interpolate_na(
+                dim='height_bins', use_coordinate=False,
+                fill_value='extrapolate', method='slinear')
+
+            # edge interpolation issues
+            aab['alpha'] = aab.alpha.where(aab.alpha >= min_icpt, min_icpt)
+            aab['alpha'] = aab.alpha.where(aab.alpha <= max_icpt, max_icpt)
 
             alpha_in = aab.alpha.values
             height_in = aab.height.values
