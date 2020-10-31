@@ -315,10 +315,8 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
 
         # assign surface type based on critical radius ("outlier suppression")
         # NaN in DEM is excluded (can be at Swiss border, where DEM ends)
-        out_ds = out_ds.where(
-            (out_ds != 0.5) & (dem < (sla + r_crit)) | np.isnan(dem), 1.)
-        out_ds = out_ds.where(
-            (out_ds != 0.5) & (dem > (sla - r_crit)) | np.isnan(dem), 0.)
+        out_ds = out_ds.where((dem < (sla + r_crit)) | np.isnan(out_ds), 1.)
+        out_ds = out_ds.where((dem > (sla - r_crit)) | np.isnan(out_ds), 0.)
 
     if date is not None:
         out_ds = out_ds.expand_dims(dim='time')
