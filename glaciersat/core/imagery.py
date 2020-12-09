@@ -68,20 +68,123 @@ class S2ImageMeta(SatelliteImageMeta):
 
     def __init__(self, path):
         super().__init__(path=path)
-        if path is not None:
-            self.path = path
-        else:
-            self.path = None
+        self.path = path
 
-        self.sensor = None
-        self.platform = None
-        self.scene_footprint = None
-        self.cloud_mask = None
-        self.cloud_area_percent = None
-        self.proc_level = None
+        # todo: we take B01 as representative for all others: ok?
+        sf_path = glob(os.path.join(path, '**', '**', '**',
+                                    'MSK_DETFOO_B01.gml'))
+        if len(sf_path) == 0:
+            log.warning('Scene footprint for {} not available.'.format(
+                os.path.basename(path)))
+        else:
+            self.get_scene_footprint(sf_path[0])
+
+        fname_split = os.path.basename(path).split('_')
+        self.date = pd.Timestamp(str(fname_split[6][:8]))
+        self.sensor = fname_split[1][:3]
+        self.platform = fname_split[0]
+        self.proc_level = fname_split[1][3:]
+
+        cm_path = glob(os.path.join(path, '**', '**', '**',
+                                    'MSK_CLOUDS_B00.gml'))
+        print('CM: ', cm_path)
+        if len(cm_path) == 0:
+            self.cloud_mask = None
+        else:
+            # todo: get_cloud_mask_from_gml needs self.grid for rasterizing
+            self.cloud_mask = None
+            self.cloud_area_percent = None
+            #self.cloud_mask = self.get_cloud_mask_from_gml(cm_path[0])
+            #self.cloud_area_percent = (np.sum(self.cloud_mask == 1)/ self.cloud_mask.size) * 100
 
     def load_data(self):
         return S2Image(safe_path=self.path)
+
+    def overlaps_shape(self, shape, percentage=100.):
+        """
+        Check if the satellite image overlaps a shape by a given percentage.
+
+        Parameters
+        ----------
+        shape: str od gpd.GeoDataFrame
+             Path to shapefile or geopandas.GeoDataFrame for region of
+             interest, e.g. a glacier outline.
+        percentage : float, optional
+             Percentage of `shape` that should intersect the satellite image
+             scene footprint. Default: 100. (satellite image has to **contain**
+             `shape` fully)
+
+        Returns
+        -------
+        overlap_bool: bool
+            Whether or not the scene footprint contains the given percentage of
+            the shape.
+        """
+        if isinstance(shape, str):
+            shape = salem.read_shapefile(shape)
+
+        ratio = percentage / 100.
+        if ratio == 1.:
+            overlap_bool = self.scene_footprint.contains(
+                shape.to_crs(self.scene_footprint.crs)).item()
+        elif 0. < ratio < 1.:
+            shape_reproj = shape.to_crs(self.scene_footprint.crs)
+            shape_area = shape_reproj.area.item()
+            intsct_area = self.scene_footprint.intersection(
+                shape_reproj).area.item()
+            if (intsct_area / shape_area) >= ratio:
+                overlap_bool = True
+            else:
+                overlap_bool = False
+        else:
+            raise ValueError("Overlap percentage must be between 0 und 100.")
+
+        return overlap_bool
+
+    def get_scene_footprint(self, fp_path: str) -> None:
+        """
+        Get and unify a Sentinel *.GML scene footprint.
+
+        Parameters
+        ----------
+        fp_path : str
+            Path to a *.GML file containing a Sentinel scene footprint.
+
+        Returns
+        -------
+        None
+        """
+        fp = gpd.read_file(fp_path)
+        fp_union = fp.unary_union
+        fp_gdf = gpd.GeoSeries(fp_union, crs=fp.crs)
+
+        self.scene_footprint = fp_gdf
+
+    def get_cloud_mask_from_gml(self, cmask_path: str) -> np.ndarray:
+        """
+        Rasterize a Sentinel *.GML cloud mask onto a given grid.
+
+        Parameters
+        ----------
+        cmask_path : str
+            Path to a *.GML file containing a Sentinel cloud mask.
+
+        Returns
+        -------
+        cmask_raster: np.ndarray
+            Cloud mask as a numpy array.
+        """
+        try:
+            cmask = gpd.read_file(cmask_path)
+        except ValueError:  # Fiona ValueError: Null layer: '' when empty
+            # assume no clouds then (mask of Zeros)
+            cmask_raster = self.grid.region_of_interest()
+            return cmask_raster
+
+        cmask_u = cmask.unary_union
+        cmask_raster = self.grid.region_of_interest(geometry=cmask_u,
+                                                    crs=cmask.crs)
+        return cmask_raster
 
 
 class LandsatImageMeta(SatelliteImageMeta):
