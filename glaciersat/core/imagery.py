@@ -12,6 +12,104 @@ import logging
 log = logging.getLogger(__name__)
 
 
+class SatelliteImageMeta:
+    """
+    Metadata class for a satellite image.
+
+    This class should hold info about the scene (sensor, platform, footprint,
+    maybe cloud percentage (mask) etc, but not supply the actual values
+    """
+
+    def __init__(self, path):
+        if path is not None:
+            self.path = path
+        else:
+            self.path = None
+
+        self.sensor = None
+        self.platform = None
+        self.scene_footprint = None
+        self.cloud_mask = None
+        self.cloud_area_percent = None
+        self.proc_level = None
+
+    def __repr__(self):
+
+        summary = ['<' + type(self).__module__ + '.' +
+                   type(self).__name__ + '>']
+        if self.sensor is not None:
+            summary += ['  Sensor: ' + self.sensor]
+        if self.platform is not None:
+            summary += ['  Platform: ' + self.platform]
+        if self.scene_footprint is not None:
+            summary += ['  Footprint: ' + 'True']
+        else:
+            summary += ['  Footprint: ' + 'False']
+        if self.cloud_mask is not None:
+            summary += ['  Cloud Mask: ' + 'True']
+        else:
+            summary += ['  Cloud Mask: ' + 'False']
+        if self.path is not None:
+            summary += ['  Origin Path: ' + self.path]
+
+        return '\n'.join(summary) + '\n'
+
+    def load_data(self):
+        return SatelliteImage(path=self.path)
+
+
+class S2ImageMeta(SatelliteImageMeta):
+    """
+    Metadata class for a Sentinel-2 satellite image.
+
+    This class should hold info about the scene (sensor, platform, footprint,
+    maybe cloud percentage (mask) etc, but not supply the actual values.
+    """
+
+    def __init__(self, path):
+        super().__init__(path=path)
+        if path is not None:
+            self.path = path
+        else:
+            self.path = None
+
+        self.sensor = None
+        self.platform = None
+        self.scene_footprint = None
+        self.cloud_mask = None
+        self.cloud_area_percent = None
+        self.proc_level = None
+
+    def load_data(self):
+        return S2Image(safe_path=self.path)
+
+
+class LandsatImageMeta(SatelliteImageMeta):
+    """
+    Metadata class for a Landsat satellite image.
+
+    This class should hold info about the scene (sensor, platform, footprint,
+    maybe cloud percentage (mask) etc, but not supply the actual values.
+    """
+
+    def __init__(self, path):
+        super().__init__(path=path)
+        if path is not None:
+            self.path = path
+        else:
+            self.path = None
+
+        self.sensor = None
+        self.platform = None
+        self.scene_footprint = None
+        self.cloud_mask = None
+        self.cloud_area_percent = None
+        self.proc_level = None
+
+    def load_data(self):
+        return LandsatImage(path=self.path)
+
+
 class SatelliteImage:
     """
     Base class for satellite images.
@@ -61,7 +159,8 @@ class SatelliteImage:
 
     def __repr__(self):
 
-        summary = ['<glaciersat.core.imagery.SatelliteImage>']
+        summary = ['<' + type(self).__module__ + '.' + type(self).__name__ +
+                   '>']
         if self.sensor is not None:
             summary += ['  Sensor: ' + self.sensor]
         if self.platform is not None:
