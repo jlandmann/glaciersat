@@ -467,7 +467,7 @@ class S2Image(SatelliteImage):
                                     attrs=bands_open[0].attrs)
             # save disk when writing later
             cmask_da.encoding.update(
-                {'dtype': 'int8', 'scale_factor': 0.01, '_FillValue': -9999,
+                {'dtype': 'int8', 'scale_factor': 0.01, '_FillValue': -99,
                  'zlib': True})
             cmask_da = cmask_da.expand_dims(dim='time')
             cmask_da = cmask_da.assign_coords(time=(['time'], [date]))
