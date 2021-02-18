@@ -1,0 +1,17 @@
+
+version: 2
+
+sphinx:
+   configuration: docs/conf.py
+
+build:
+    image: latest
+
+conda:
+    file: ci/requirements-py39-all.yml
+
+python:
+    version: 3.9
+    install: true
+
+formats: []
