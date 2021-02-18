@@ -11,7 +11,7 @@ conda:
     environment: ci/requirements-py39-all.yml
 
 python:
-    version: 3.9
+    version: 3.8
     install: true
 
 formats: []
