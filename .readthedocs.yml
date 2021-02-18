@@ -8,7 +8,7 @@ build:
     image: latest
 
 conda:
-    file: ci/requirements-py39-all.yml
+    environment: ci/requirements-py39-all.yml
 
 python:
     version: 3.9
