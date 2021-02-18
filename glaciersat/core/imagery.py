@@ -259,6 +259,8 @@ class SatelliteImage:
         self.platform = None
         self.scene_footprint = None
         self.cloud_mask = None
+        self.cloud_area_percent = None
+        self.proc_level = None
 
     def __repr__(self):
 
@@ -348,9 +350,9 @@ class S2Image(SatelliteImage):
         self.band_names = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07',
                            'B08', 'B09', 'B10', 'B11', 'B12', 'B8A']
         self.cloud_mask_names = ['CMASK']
-        self.bands_names_short = ['ca', 'b', 'g', 'r', 'vre1', 'vre2', 'vre3',
-                                  'nir', 'wv', 'swirc', 'swir1', 'swir2',
-                                  'nnir']
+        self.band_names_short = ['ca', 'b', 'g', 'r', 'vre1', 'vre2', 'vre3',
+                                 'nir', 'wv', 'swirc', 'swir1', 'swir2',
+                                 'nnir']
         self.band_names_long = ['Coastal Aerosol', 'Blue', 'Green', 'Red',
                                 'Vegetation Red Edge 1',
                                 'Vegetation Red Edge 2',
@@ -362,6 +364,16 @@ class S2Image(SatelliteImage):
         self.bands_60m = ['B01', 'B09', 'B10']
         self.bands_20m = ['B05', 'B06', 'B07', 'B11', 'B12', 'B8A']
         self.bands_10m = ['B02', 'B03', 'B04', 'B08']
+
+        if safe_path is not None:
+            self.proc_level = os.path.basename(safe_path).split('_')[1][3:]
+        # band 10 not present for processing level 2a
+        if self.proc_level.lower() == 'l2a':
+            b10_ix = self.band_names.index('B10')
+            self.band_names.remove('B10')
+            self.bands_60m.remove('B10')
+            del self.band_names_short[b10_ix]
+            del self.band_names_long[b10_ix]
 
         # scaling factor (e.g. for albedo computation)
         self.scale_fac = 10000.
@@ -401,13 +413,15 @@ class S2Image(SatelliteImage):
 
         # check if we want to unzip
         if safe_path.endswith('.zip'):
+            safe_path = safe_path[:-4]  # clip off '*.zip'
             raise NotImplementedError('Unzipping is not yet supported.')
 
         bpaths = []
         for b in self.band_names:
             fl = glob(os.path.join(safe_path, '**', '**', '**', '**',
                                    str('*' + b + '.jp2')), recursive=True)
-            bpaths.append(fl[0])
+            # sort and take the one with the highest resolution (level 2A)
+            bpaths.append(sorted(fl)[0])
         bands_open = [xr.open_rasterio(p, chunks={'x': 500, 'y': 500})
                       for p in bpaths]
 

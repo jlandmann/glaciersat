@@ -9,29 +9,6 @@ import logging
 log = logging.getLogger(__file__)
 
 
-def rasterize_shape(shp, resolution):
-    """
-    Rasterize a shapefile.
-
-    In this application, this is especially useful e.g. for rasterizing cloud
-    masks.
-
-    # todo: take this func from salem
-
-    Parameters
-    ----------
-    shp :
-    resolution : float
-        Target resolution in meters (m).
-
-    Returns
-    -------
-    raster: salem.
-
-    """
-    #mask_all_touched = grid.region_of_interest(shape=, all_touched=True)
-
-
 def crop_sat_image_to_glacier(ds: xr.Dataset or imagery.SatelliteImage,
                               gdir_candidates: list = None,
                               out_dirs: list = None, grids: list = None,
@@ -42,6 +19,7 @@ def crop_sat_image_to_glacier(ds: xr.Dataset or imagery.SatelliteImage,
 
     Parameters
     ----------
+
     ds : xr.Dataset or glaciersat.core.imagery.SatelliteImage
         Object containing the satellite image.
     gdir_candidates: list of GlacierDirectories, optional
@@ -50,7 +28,7 @@ def crop_sat_image_to_glacier(ds: xr.Dataset or imagery.SatelliteImage,
     out_dirs: list of str, optional
         List with according output directories for the case that `grids` is
         given.
-    grids: list of `salem.Grid`s, optional
+    grids: list of salem.Grid, optional
         List with salem.Grids defining a glacier region to which the data shall
         be clipped. Mutually exclusive with `gdir_candidates`. Default: None.
     min_overlap: float
@@ -58,7 +36,7 @@ def crop_sat_image_to_glacier(ds: xr.Dataset or imagery.SatelliteImage,
         100. (glacier must be contained fully in satellite image footprint).
     shapes: list or None, optional
         List of paths to shapes of glaciers. Must be in the same order like
-        `gdir_candidates`or `grids`, respectively. If `None`and
+        `gdir_candidates` or `grids`, respectively. If `None` and
         `gdir_candidates` is given, shapes will be retrieved from the outlines
         in the glacier directory. Default: None.
 
@@ -101,14 +79,15 @@ def crop_sat_image_to_glacier(ds: xr.Dataset or imagery.SatelliteImage,
 
     ds.load()
 
+    if not isinstance(ds, xr.Dataset):
+        ds = ds.to_dataset(name='albedo', promote_attrs=True)
+
     for i, grid in enumerate(grids):
 
         if (cand_in_img is not None) and (cand_in_img[i] is False):
             continue
 
         grid_ds = grid.to_dataset()
-        if not isinstance(ds, xr.Dataset):
-            ds = ds.to_dataset(name='albedo', promote_attrs=True)
         ds_glacier = grid_ds.salem.transform(ds, interp='linear')
 
         # can be that grid is outside satellite image
