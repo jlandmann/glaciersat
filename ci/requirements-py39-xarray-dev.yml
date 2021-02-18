@@ -7,6 +7,8 @@ dependencies:
   - xarray>=0.16
   - netCDF4
   - joblib
+  - ipykernel
+  - ipython
   - shapely
   - geopandas
   - pandas

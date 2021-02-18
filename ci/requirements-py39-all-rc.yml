@@ -7,6 +7,8 @@ dependencies:
   - sentinelsat
   - xarray>=0.16
   - netCDF4
+  - ipykernel
+  - ipython
   - joblib
   - shapely
   - geopandas
