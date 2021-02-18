@@ -85,6 +85,7 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
         assert cmask.ndim <= 2
         nir *= cmask
     else:
+        cloud_cov_ratio = 0.
         log.warning('No cloud mask information given. Still proceeding and '
                     'pretending a cloud-free scene...')
 
@@ -222,6 +223,7 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
         cmask[cmask <= cprob_thresh] = 1.
     else:
         cmask = np.ones_like(albedo.isel(broadband=0))
+        cloud_cov_ratio = 0.
         log.warning('No cloud mask information given. Still proceeding and '
                     'pretending a cloud-free scene...')
 
@@ -299,8 +301,10 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
             r_squared = get_model_fit_r_squared(
                 _root_sum_squared_residuals, _step_function, height_in,
                 alpha_in, bounds=([min_ampl, min_icpt], [max_ampl, max_icpt]),
-                x0=np.array([np.nanmax(alpha_in) - np.nanmin(alpha_in),
-                             np.nanmin(alpha_in)]), b=sla)
+                x0=np.array([np.clip(np.nanmax(alpha_in) - np.nanmin(alpha_in),
+                                     min_ampl, max_ampl),
+                             np.clip(np.nanmin(alpha_in), min_icpt,
+                                     max_icpt)]), b=sla)
 
             # in funny cases, r_squared can be negative
             r_squared = np.clip(r_squared, 0., None)
