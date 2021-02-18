@@ -14,6 +14,6 @@ python:
     version: 3.8
     install:
       - method: setuptools
-          path: glaciersat
+        path: glaciersat
 
 formats: []
