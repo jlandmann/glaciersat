@@ -1,5 +1,6 @@
 [![Repository Status](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/badges/latest/wip.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Documentation Status](https://readthedocs.org/projects/glaciersat/badge/?version=latest)](https://glaciersat.readthedocs.io/en/latest/?badge=latest)
 
 # Observe glaciers from satellites
 
