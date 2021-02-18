@@ -13,11 +13,18 @@ def test_get_broadband_albedo_knap():
     a_res = np.array([[0.07369, 0.1431425], [0.20906, 0.2714425]])
     np.testing.assert_allclose(a, a_res)
 
+    # test negative
+    np.testing.assert_equal(get_broadband_albedo_knap(0.000005, 0.00009), 0.)
+
 
 def test_get_broadband_albedo_liang():
     a = get_broadband_albedo_liang(b, r, nir, swir1, swir2)
     a_res = np.array([[0.088025, 0.1592], [0.230375, 0.29975]])
     np.testing.assert_allclose(a, a_res)
+
+    # very improbable, but here we go:
+    np.testing.assert_equal(get_broadband_albedo_liang(0.0001, 0.0001, 0.0001,
+                                                       0.00001, 0.0001), 0.)
 
 
 def test_get_broadband_albedo_bonafoni():
