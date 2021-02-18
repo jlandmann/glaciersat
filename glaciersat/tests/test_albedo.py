@@ -14,7 +14,7 @@ def test_get_broadband_albedo_knap():
     np.testing.assert_allclose(a, a_res)
 
     # test negative
-    np.testing.assert_equal(get_broadband_albedo_knap(0.000005, 0.00009), 0.)
+    np.testing.assert_equal(get_broadband_albedo_knap(0.0001, 0.01290877), 0.)
 
 
 def test_get_broadband_albedo_liang():
