@@ -2,7 +2,7 @@ name: test_env
 channels:
   - conda-forge
 dependencies:
-  - python=3.7
+  - python=3.9
   - sentinelsat
   - xarray>=0.16
   - netCDF4
@@ -20,13 +20,13 @@ dependencies:
   - scikit-image
   - pip
   - pip:
+      - git+https://github.com/pydata/xarray.git
       - salem
       - sentinelsat
       - schedule
       - coveralls
+      - pytest
       - pytest-cov
       - pytest-mpl
       - motionless
       - descartes
-
-
