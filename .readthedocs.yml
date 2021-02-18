@@ -12,6 +12,8 @@ conda:
 
 python:
     version: 3.8
-    install: []
+    install:
+      - method: setuptools
+          path: glaciersat
 
 formats: []
