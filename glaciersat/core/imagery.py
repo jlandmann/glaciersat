@@ -366,7 +366,15 @@ class S2Image(SatelliteImage):
         self.bands_10m = ['B02', 'B03', 'B04', 'B08']
 
         if safe_path is not None:
+            self.path = safe_path
             self.proc_level = os.path.basename(safe_path).split('_')[1][3:]
+        else:
+            self.path = None
+            try:
+                self.proc_level = ds.attrs['proc_level']
+            except KeyError:
+                pass  # None is inherited default
+
         # band 10 not present for processing level 2a
         if self.proc_level.lower() == 'l2a':
             b10_ix = self.band_names.index('B10')
@@ -419,7 +427,7 @@ class S2Image(SatelliteImage):
         bpaths = []
         for b in self.band_names:
             fl = glob(os.path.join(safe_path, '**', '**', '**', '**',
-                                   str('*' + b + '.jp2')), recursive=True)
+                                   str('*' + b + '*.jp2')), recursive=True)
             # sort and take the one with the highest resolution (level 2A)
             bpaths.append(sorted(fl)[0])
         bands_open = [xr.open_rasterio(p, chunks={'x': 500, 'y': 500})
@@ -466,26 +474,16 @@ class S2Image(SatelliteImage):
              'zlib': True})
 
         # process cloud mask
-        cm_path = glob(
-            os.path.join(safe_path, '**', '**', '**', 'MSK_CLOUDS_B00.gml'))
-        if len(cm_path) == 0:
-            log.warning('Cloud mask for {} not available.'.format(
-                os.path.basename(safe_path)))
+        self.cloud_mask = self.get_cloud_mask()
+
+        # should not happen
+        if self.cloud_mask is None:
             all_bands = all_bands.to_dataset(name='bands',
                                              promote_attrs=True)
         else:
-            self.cloud_mask = self.get_cloud_mask_from_gml(cm_path[0])
-            cmask_da = xr.DataArray(self.cloud_mask,
-                                    coords=bands_open[0].coords,
-                                    dims=bands_open[0].dims, name='cmask',
-                                    attrs=bands_open[0].attrs)
-            # save disk when writing later
-            cmask_da.encoding.update(
-                {'dtype': 'int8', 'scale_factor': 0.01, '_FillValue': -99,
-                 'zlib': True})
+            cmask_da = self.cloud_mask.copy(deep=True)
             cmask_da = cmask_da.expand_dims(dim='time')
             cmask_da = cmask_da.assign_coords(time=(['time'], [date]))
-            cmask_da.attrs['pyproj_srs'] = all_bands.crs.split('=')[1]
             # attrs should be the same anyway, but first has 'pyproj_srs'
             all_bands = xr.merge([all_bands, cmask_da],
                                  combine_attrs='no_conflicts')
@@ -502,7 +500,7 @@ class S2Image(SatelliteImage):
 
         return all_bands
 
-    def get_cloud_mask_from_gml(self, cmask_path: str) -> np.ndarray:
+    def get_cloud_mask_from_gml(self, cmask_path: str) -> xr.DataArray:
         """
         Rasterize a Sentinel *.GML cloud mask onto a given grid.
 
@@ -513,8 +511,8 @@ class S2Image(SatelliteImage):
 
         Returns
         -------
-        cmask_raster: np.ndarray
-            Cloud mask as a numpy array.
+        cmask_da: xr.DataArray
+            Cloud mask as an xr.DataArray.
         """
         try:
             cmask = gpd.read_file(cmask_path)
@@ -526,7 +524,97 @@ class S2Image(SatelliteImage):
         cmask_u = cmask.unary_union
         cmask_raster = self.grid.region_of_interest(geometry=cmask_u,
                                                     crs=cmask.crs)
-        return cmask_raster
+        cmask_da = xr.DataArray(
+            cmask_raster,
+            coords={'x': self.grid.x_coord, 'y': self.grid.y_coord},
+            dims=('y', 'x'),
+            name='cmask',
+            attrs={'pyproj_srs': self.grid.crs})
+        return cmask_da
+
+    def get_cloud_mask_from_scl(self, cmask_path: str) -> xr.DataArray:
+        """
+        Get cloud information from scene classification (2A processing only).
+
+        This cloud mask should in principle be better the the one from GML.
+
+        Parameters
+        ----------
+        cmask_path : str
+            Path to a *.GML file containing a Sentinel cloud mask.
+
+        Returns
+        -------
+        cmask_raster: xr.DataArray
+            Cloud mask as a DataArray.
+        """
+
+        scene_class = xr.open_rasterio(cmask_path).isel(band=0)
+        # set the magic attribute
+        scene_class.attrs['pyproj_srs'] = scene_class.attrs['crs']
+
+        # select "odd" classes:
+        # 2 (dark areas), 3 (cloud shadows), 8 (medium cloud prob.),
+        # 9 (high cloud prob.)
+        # todo: check 6 (cloud shadows on glaciers sometimes interpreted as water)
+        cmask = xr.where((scene_class == 2) | (scene_class == 3) |
+                            (scene_class == 8) | (scene_class == 9), 1, 0)
+        cmask.attrs['pyproj_srs'] = scene_class.attrs['pyproj_srs']
+        cmask = self.grid.to_dataset().salem.transform(
+            cmask.to_dataset(name='cmask'))
+
+        return cmask.cmask
+
+    def get_cloud_mask(self, cm_path=None) -> xr.DataArray or None:
+        """
+
+        Parameters
+        ----------
+        cm_path :
+
+        Returns
+        -------
+
+        """
+
+        if cm_path is not None:
+            if cm_path.endswith('jp2'):
+                cmask = self.get_cloud_mask_from_scl(cm_path)
+            elif cm_path.endswith('gml'):
+                cmask = self.get_cloud_mask_from_gml(cm_path)
+            else:
+                raise ValueError('Given cloud mask path must be a ".GML" or '
+                                 '"*.jp2" file.')
+        else:
+            # level 2A should have the best cloud mask - get it if possible
+            if self.proc_level.lower() == 'l2a':
+                cm_path = glob(os.path.join(
+                    self.path, '**', '**', '**', 'R20m', '*SCL_20m.jp2'))[0]
+                # todo: avoid double code, and try l1c if l2a fails
+                if len(cm_path) == 0:
+                    log.warning('Cloud mask for {} not available.'.format(
+                        os.path.basename(self.path)))
+                    return None
+                cmask = self.get_cloud_mask_from_scl(cm_path)
+            elif self.proc_level.lower() == 'l1c':
+                cm_path = glob(os.path.join(self.path, '**', '**', '**',
+                                            'MSK_CLOUDS_B00.gml'))[0]
+                if len(cm_path) == 0:
+                    log.warning('Cloud mask for {} not available.'.format(
+                        os.path.basename(self.path)))
+                    return None
+                cmask = self.get_cloud_mask_from_gml(cm_path)
+            else:
+                raise ValueError(
+                    'If no cloud mask path is given, the "proc_level" '
+                    'attribute must be set.')
+
+        # save disk when writing later
+        cmask.encoding.update(
+            {'dtype': 'int8', 'scale_factor': 0.01, '_FillValue': -99,
+             'zlib': True})
+
+        return cmask
 
     def get_scene_footprint(self, fp_path: str) -> None:
         """
