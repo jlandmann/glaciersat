@@ -3,7 +3,7 @@ import os
 import sys
 import numpy as np
 import xarray as xr
-from typing import Union, Iterable
+from typing import Union, Iterable, Tuple
 
 import logging
 # Logging options
@@ -36,6 +36,28 @@ def normalized_difference(a: Union[int, float, np.array, xr.DataArray],
     """
     norm_diff = (a - b) / (a + b)
     return norm_diff
+
+
+def rescale(data: Union[float, np.array, xr.DataArray],
+            thresholds: Tuple[float, float]) -> \
+        Union[float, np.array, xr.DataArray]:
+    """
+    Rescale some data to given thresholds, so that data ranges now from 0 to 1.
+
+    Parameters
+    ----------
+    data : float or np.array or xr.DataArray
+        The data to rescale.
+    thresholds : tuple
+        Tuple containing the min/max value to which to rescale the data.
+
+    Returns
+    -------
+    same as `data`
+        The same data structure as `data`but the values rescaled to range from
+        zero to one between the `thresholds`.
+    """
+    return (data - (thresholds[0])) / (thresholds[1] - thresholds[0])
 
 def get_credentials(credfile: str = None) -> ConfigObj:
     """
