@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Optional, Iterable, Sized
 import xarray as xr
 import os
 from glob import glob
@@ -1027,3 +1027,328 @@ def additional_threshold_to_find_more_snow_in_shadow(
     return (image.bands.sel(band='B01') > 0.331) & (
             image.bands.sel(band='B09') > 0.294) & ((image.bands.sel(
         band='B01') - image.bands.sel(band='B10')) > 0.294)
+
+
+def cloudmask_based_on_moisture(
+        image: Union[xr.Dataset, S2Image]) -> xr.Dataset:
+    """
+    Calculate a cloud mask based on the normalized difference moisture index.
+
+    todo: works only for SEN-2 at the moment (we need band aliases in netCDF)
+
+    Parameters
+    ----------
+    image : xr.Dataset or imagery.S2Image
+        The Sentinel satellite image (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+
+    Returns
+    -------
+    cloud_mask: xr.Dataset
+         Cloud mask from moisture index, with ones as potential clouds.
+    """
+    if isinstance(image, S2Image):
+        cloud_mask = image.get_ndmi()
+    elif isinstance(image, xr.Dataset):
+        cloud_mask = ndmi(image.bands.sel(band='B08'),
+                          image.bands.sel(band='B11'))
+    else:
+        raise NotImplementedError(
+            'Only an `imagery.S2Image` or `xr.Dataset` are accepted to '
+            'calculate clouds from moisture at the moment.')
+
+    cloud_mask = xr.where(cloud_mask < 0.78, 1., 0.)
+
+    return cloud_mask
+
+
+def esa_partial_cloud_probability(
+        image: Union[xr.Dataset, S2Image]) -> xr.Dataset:
+    """
+    Partial implementation of the ESA Sentinel-2 cloud masking algorithm.
+
+    It's based on [1]_, using threshold in the Red channel and in the
+    Normalized Difference Snow Index (NDSI) to mask clouds.
+
+    Parameters
+    ----------
+    image : xr.Dataset or imagery.S2Image
+        The Sentinel satellite image (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+
+    Returns
+    -------
+
+    References
+    ----------
+    .. [1]: https://bit.ly/2ONoqQd
+    """
+    if isinstance(image, S2Image):
+        snow_ix = image.get_ndsi()
+    elif isinstance(image, xr.Dataset):
+        snow_ix = ndsi(image.bands.sel(band='B03'),
+                            image.bands.sel(band='B11'))
+    else:
+        raise NotImplementedError(
+            'Only an `imagery.S2Image` or `xr.Dataset` are accepted to '
+            'calculate clouds using the ESA method at the moment.')
+    ndsi_cloud_prob = np.clip((snow_ix + 0.1) / 0.3, 0., 1.)
+    red_cloud_prob = image.sel(band='B04')
+    red_cloud_prob = np.clip((red_cloud_prob - 0.07) / 0.18, 0., 1)
+
+    cloud_or_ice = snow_ix.values.copy()
+    cloud_or_ice[snow_ix > 0.8] = 0.
+    cloud_or_ice[snow_ix < 0.8] = 1.
+
+    final = ndsi_cloud_prob * red_cloud_prob * cloud_or_ice
+    return final
+
+
+def geeguide_cloud_mask(
+        image: Union[xr.Dataset, S2Image]) -> np.ndarray:
+    """
+    Cloud mask adapted and modified from the geeguide repo on GitHub [1]_.
+
+    Parameters
+    ----------
+    image : xr.Dataset or imagery.S2Image
+        The Sentinel satellite image (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+    # todo: this is tailored to Sentinel-2 at the moment.
+
+    Returns
+    -------
+    score: np.ndarray
+        Mask with clouds indicated as ones.
+
+    References
+    ----------
+    .. [1]: https://bit.ly/3l7F2OW
+    """
+
+    if isinstance(image, S2Image):
+        image = image.data
+
+    score = np.ones((len(image.y), len(image.x)))
+    score = np.min([score, utils.rescale(image.sel(band='B02'), [0.1, 0.5])],
+                   axis=0)
+    score = np.min([score, utils.rescale(image.sel(band='B01'), [0.1, 0.3])],
+                   axis=0)
+    score = np.min([score, utils.rescale(
+        image.sel(band='B01') + image.sel(band='B11'), [0.15, 0.2])],
+                   axis=0)  # actually cirrus (B10)
+
+    score = np.min([score, utils.rescale(
+        image.sel(band='B04') + image.sel(band='B03') + image.sel(band='B02'),
+        [0.2, 0.8])], axis=0)
+
+    ndmi = utils.normalized_difference(image.sel(band='B8A'),
+                                       image.sel(band='B11'))
+    score = np.min([score, utils.rescale(ndmi, [-0.1, 0.1])], axis=0)
+
+    ndsi = utils.normalized_difference(image.sel(band='B03'),
+                                       image.sel(band='B11'))
+    score = np.min([score, utils.rescale(ndsi, [0.8, 0.6])], axis=0)
+
+    score[score < 1.] = 0.
+
+    return score
+
+
+def zeller_cloud_score(
+        image: Union[xr.Dataset, S2Image]) -> np.ndarray:
+    """
+    Cloud mask adapted and modified from Josias Zeller's MSc Thesis [1]_.
+
+    This is similar to `geeguide_cloud_mask`, but (1) does not return a mask,
+    but only the raw score, and (2) has different thresholds. It does not work
+    as good as the geeguide one yet, so either there is a bug or something
+    wrong with the thresholds!?
+
+    Parameters
+    ----------
+    image : xr.Dataset or imagery.S2Image
+        The Sentinel satellite image (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+    # todo: this is tailored to Sentinel-2 at the moment.
+
+    Returns
+    -------
+    score: np.ndarray
+        Mask with clouds indicated as ones.
+
+    References
+    ----------
+    .. [1]: https://bit.ly/3l7F2OW
+    """
+
+    # Compute several indicators of cloudiness and take the minimum of them.
+    score = np.ones((len(image.y), len(image.x)))
+
+    # Clouds are reasonably bright in the blue band.
+    score = np.min(
+        [score, utils.rescale(image.sel(band='B02'), [0.1, 0.5]).values],
+        axis=0)
+
+    # Clouds are reasonably bright in all visible bands.
+    score = np.min([score, utils.rescale(
+        image.sel(band='B02') + image.sel(band='B03') + image.sel(band='B04'),
+        [0.2, 0.8]).values], axis=0)
+
+    # Clouds are moist
+    ndmi = utils.normalized_difference(image.sel(band='B08').values,
+                                       image.sel(band='B11').values)
+    score = np.min([score, utils.rescale(ndmi, [-0.1, 0.1])], axis=0)
+
+    # However, clouds are not snow.
+    ndsi = utils.normalized_difference(image.sel(band='B03'),
+                                       image.sel(band='B11').values)
+    score = np.min([score, utils.rescale(ndsi, [0.4, 0.1])], axis=0)
+
+    return score
+
+
+def project_cloud_shadows(cloud_mask: np.ndarray, sun_zenith_rad: float,
+                          sun_azimuth_rad: float, resolution: float,
+                          cloud_heights: Optional[
+                              Union[Iterable, Sized]] = None) -> np.ndarray:
+    """
+    Project shadows of masked cloud with assumed heights onto image.
+
+    # todo: find better way to limit the pot. cloud heights. They vary a lot.
+    # todo: does not account for terrain geometry for shadow casting(Corripio?)
+
+    Parameters
+    ----------
+    cloud_mask : np.ndarray
+        Array that indicates the presence of clouds (1) and cloud-free pixels
+        (0).
+    sun_zenith_rad : float
+        Sun zenith angle at scene acquisition time. Mostly, one mean value over
+        the scene is enough.
+    sun_azimuth_rad : float
+        Sun azimuth angle at scene acquisition time. Mostly, one mean value
+        over the scene is enough.
+    resolution : float
+        Scene resolution (m), i.e. the distance between two pixel centers in
+        meters.
+    cloud_heights : Iterable, optional
+        The potential cloud heights (guess!) of the clouds in the scene.
+
+    Returns
+    -------
+    smask: np.ndarray
+
+    """
+
+    if cloud_heights is None:
+        cloud_heights = np.arange(cfg.PARAMS['cloud_heights_range'][0],
+                                  cfg.PARAMS['cloud_heights_range'][1],
+                                  cfg.PARAMS['cloud_heights_interval'])
+    # create final array
+    smask = np.zeros(
+        (len(cloud_heights), cloud_mask.shape[0], cloud_mask.shape[1]))
+
+    cy, cx = np.where(cloud_mask == 1.)
+    for i, ch in enumerate(cloud_heights):
+        # Distance shadow is cast
+        cast_distance = np.tan(sun_zenith_rad) * ch
+        y = np.around(
+            np.cos(sun_azimuth_rad) * cast_distance / resolution).astype(
+            int)  # X distance of shadow
+        x = np.around(
+            np.sin(sun_azimuth_rad) * cast_distance / resolution).astype(
+            int)  # Y distance of  shadow
+
+        # might be erroneous at the borders, but we don't care (will be eroded)
+        smask[i, np.clip(cy + y, 0., cloud_mask.shape[0]).astype(
+            int) - 1, np.clip(cx + x, 0, cloud_mask.shape[1] - 1).astype(
+            int)] = 1.
+
+    return smask
+
+
+def create_cloud_shadow_mask(cloud_mask: np.ndarray,
+                             image: Union[xr.Dataset, S2Image],
+                             mean_azimuth: float, mean_zenith: float,
+                             cloud_heights: Optional[Iterable] = None,
+                             erode_n_pixels: Optional[int] = None,
+                             dilate_n_pixels: Optional[int] = None,
+                             ir_sum_thresh: Optional[float] = None):
+    """
+    Create a mask with cloud shadow on the image.
+
+    This is necessary, because usually cloud and cloud shadow detection on
+    glaciers e.g. with the ESA scene calssification map is insufficient.
+
+    This is a Python implementation of the basic cloud shadow shift by Gennadii
+    Donchyts ( License: Apache 2.0 ), adapted from [1]_
+
+    Parameters
+    ----------
+    cloud_mask :
+    image : xr.Dataset or imagery.S2Image
+        The Sentinel satellite image (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+    mean_azimuth : float
+        Mean scene sun azimuth angle in degrees from North.
+    mean_zenith : float
+        Mean scene sun zenith angle in degrees.
+    cloud_heights : iterable, optional
+        Iterable with potential cloud heights.
+    erode_n_pixels : int, optional
+        Features of which size (in pixels) shall survive? It is important to
+        remove some, because otherwise the result is too noisy and has too
+        many false detections. Default: None (parsed from params.cfg)
+    dilate_n_pixels : int, optional
+        How many pixels to dilate the mask after erosion again? Default: None
+        (parsed from params.cfg)
+    ir_sum_thresh : float, optional
+        A threshold to mask out dark pixels. A lower threshold means masking
+        out less pixels. Default: None (parsed from params.cfg)
+
+    Returns
+    -------
+
+    References
+    ----------
+    .. [1]: https://bit.ly/3t4ctEP
+    """
+
+    # Find dark pixels
+    if ir_sum_thresh is None:
+        ir_sum_thresh = cfg.PARAMS['ir_sum_thresh']
+    dark_pixels = (image.sel(band='B08') + image.sel(band='B11') + image.sel(
+        band='B12')) < ir_sum_thresh
+
+    # Get metric scale of image
+    resolution = (image.x[1] - image.x[0]).item()
+
+    # Find where cloud shadows might be based on geometry
+    # Convert solar geometry to radians
+    azi_rad = np.deg2rad(360. - mean_azimuth)  # unit circle is counter-clockw.
+    zen_rad = np.deg2rad(mean_zenith)
+
+    # Find the shadows for different cloud heights
+    shadows = project_cloud_shadows(cloud_mask, zen_rad, azi_rad, resolution,
+                                    cloud_heights=cloud_heights)
+
+    # Merge pot. shadows from all heights
+    shadow_mask = np.max(shadows, axis=0)
+
+    # Remove cloud areas
+    shadow_mask_woc = (shadow_mask == 1.) & (cloud_mask == 0.)
+
+    # Remove clutter
+    if erode_n_pixels is None:
+        erode_n_pixels = cfg.PARAMS['erode_n_pixels']
+    if dilate_n_pixels is None:
+        dilate_n_pixels = cfg.PARAMS['dilate_n_pixels']
+    shadow_mask_declut = utils.declutter(shadow_mask_woc,
+                                         n_erode=erode_n_pixels,
+                                         n_dilate=dilate_n_pixels)
+
+    # select only those pixels that are really dark
+    shadow_mask_final = shadow_mask_declut * dark_pixels
+
+    return shadow_mask_final
