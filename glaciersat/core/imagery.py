@@ -994,3 +994,36 @@ def hollstein_fig8_shadow_class(
     path3 = (green > 0.319) & ((vre1 / swir1) > 4.33) & (green < 0.525) & (
             (ca / vre1) > 1.184)
     return path1 | path2 | path3
+
+
+def additional_threshold_to_find_more_snow_in_shadow(
+        image: Union[xr.Dataset, S2Image]) -> xr.DataArray:
+    """
+    A try to make the endmembers profiles from [Naegeli et al. (2017)]_
+    distinguishable in shadowed regions.
+
+    Parameters
+    ----------
+    image : xr.Dataset or imagery.S2Image
+        The Sentinel satellite image (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+
+    Returns
+    -------
+    xr.DataArray
+        Boolean mask with shadows as True.
+
+    References
+    ----------
+    .. [Naegeli et al. (2017)]: Naegeli, K., Damm, A., Huss, M., Wulf, H.,
+        Schaepman, M., & Hoelzle, M. (2017). Cross-comparison of albedo
+        products for glacier surfaces derived from airborne and satellite
+        (Sentinel-2 and Landsat 8) optical data. Remote Sensing, 9(2), 110.
+    """
+
+    if isinstance(image, S2Image):
+        image = image.data
+    # based on comparing histograms
+    return (image.bands.sel(band='B01') > 0.331) & (
+            image.bands.sel(band='B09') > 0.294) & ((image.bands.sel(
+        band='B01') - image.bands.sel(band='B10')) > 0.294)
