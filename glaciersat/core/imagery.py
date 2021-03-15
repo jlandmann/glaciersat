@@ -1,3 +1,4 @@
+from typing import Union
 import xarray as xr
 import os
 from glob import glob
@@ -6,6 +7,7 @@ import salem
 import numpy as np
 import geopandas as gpd
 from glaciersat.core import albedo
+from glaciersat import utils
 
 import logging
 
@@ -677,6 +679,53 @@ class S2Image(SatelliteImage):
             alpha_ens.path = self.path
             return alpha_ens
 
+    def get_ndvi(self):
+        """
+        Normalised difference vegetation index.
+
+        Returns
+        -------
+        xr.DataArray:
+            DataArray containing the NDVI.
+        """
+        return ndvi(self.data.bands.sel(band='B08'),
+                    self.data.bands.sel(band='B04'))
+
+    def get_ndmi(self):
+        """
+        Normalised difference moisture index.
+
+        Returns
+        -------
+        xr.DataArray:
+            DataArray containing the NDMI.
+        """
+        return ndmi(self.data.bands.sel(band='B08'),
+                    self.data.bands.sel(band='B11'))
+
+    def get_ndsi(self):
+        """
+        Normalised difference snow index.
+
+        Returns
+        -------
+        xr.DataArray:
+            DataArray containing the NDSI.
+        """
+        return ndsi(self.data.bands.sel(band='B03'),
+                    self.data.bands.sel(band='B11'))
+
+    def get_ndwi(self):
+        """
+        Normalised difference water index.
+
+        Returns
+        -------
+        xr.DataArray:
+            DataArray containing the NDWI.
+        """
+        return ndsi(self.data.bands.sel(band='B03'),
+                    self.data.bands.sel(band='B08'))
 
 class LandsatImage(SatelliteImage):
     def __init__(self):
@@ -684,3 +733,95 @@ class LandsatImage(SatelliteImage):
 
     def from_download_file(self, download_path):
         pass
+
+
+def ndvi(nir: Union[xr.DataArray, np.ndarray, float, int],
+         red: Union[xr.DataArray, np.ndarray, float, int]) -> \
+        Union[xr.DataArray, np.ndarray, float, int]:
+    """
+    Calculate the normalised difference vegetation index.
+
+    Sentinel-2: B08, B04
+
+    Parameters
+    ----------
+    nir : xr.DataArray or np.ndarray or float or int
+        Near infrared band acquisition.
+    red : xr.DataArray or np.ndarray or float or int
+        Red band acquisition.
+
+    Returns
+    -------
+    same as input:
+        Normalised difference vegetation index.
+    """
+    return utils.normalized_difference(nir, red)
+
+
+def ndwi(g: Union[xr.DataArray, np.ndarray, float, int],
+         nir: Union[xr.DataArray, np.ndarray, float, int]) -> \
+        Union[xr.DataArray, np.ndarray, float, int]:
+    """
+    Calculate the normalised difference water index.
+
+    Sentinel-2: B03, B08
+
+    Parameters
+    ----------
+    g : xr.DataArray or np.ndarray or float or int
+        Green band acquisition.
+    nir : xr.DataArray or np.ndarray or float or int
+        Near infrared band acquisition.
+
+    Returns
+    -------
+    same as input:
+        Normalised difference water index.
+    """
+    return utils.normalized_difference(g, nir)
+
+
+def ndsi(g: Union[xr.DataArray, np.ndarray, float, int],
+         swir1: Union[xr.DataArray, np.ndarray, float, int]) -> \
+        Union[xr.DataArray, np.ndarray, float, int]:
+    """
+    Calculate the normalised difference snow index.
+
+    Sentinel-2: B03, B11
+
+    Parameters
+    ----------
+    g : xr.DataArray or np.ndarray or float or int
+        Green band acquisition.
+    swir1 : xr.DataArray or np.ndarray or float or int
+        Short wave infrared band acquisition.
+
+    Returns
+    -------
+    same as input:
+        Normalised difference snow index.
+    """
+    return utils.normalized_difference(g, swir1)
+
+
+def ndmi(nir: Union[xr.DataArray, np.ndarray, float, int],
+         swir1: Union[xr.DataArray, np.ndarray, float, int]) -> \
+        Union[xr.DataArray, np.ndarray, float, int]:
+    """
+    Normalized difference moisture index.
+
+    Sentinel-2: B8A, B11
+
+    Parameters
+    ----------
+    nir : xr.DataArray or np.ndarray or float or int
+        Near infrared band acquisition.
+    swir1 : xr.DataArray or np.ndarray or float or int
+        Short wave infrared band acquisition.
+
+    Returns
+    -------
+    same as input:
+        Normalised difference moisture index.
+    """
+    return utils.normalized_difference(nir, swir1)

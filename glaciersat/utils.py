@@ -1,6 +1,9 @@
 from configobj import ConfigObj, ConfigObjError
 import os
 import sys
+import numpy as np
+import xarray as xr
+from typing import Union, Iterable
 
 import logging
 # Logging options
@@ -10,6 +13,29 @@ logging.basicConfig(format='%(asctime)s: %(name)s: %(message)s',
 log = logging.getLogger(__name__)
 log.setLevel('DEBUG')
 
+
+def normalized_difference(a: Union[int, float, np.array, xr.DataArray],
+                          b: Union[int, float, np.array, xr.DataArray]) \
+        -> Union[int, float, np.array, xr.DataArray]:
+    """
+    Calculate the normalized difference between `a` and `b`.
+
+    .. math:: \frac{a - b}{a + b}
+
+    Parameters
+    ----------
+    a : int, float, np.array, xr.DataArray
+        Minuend.
+    b : int, float, np.array, xr.DataArray
+        Subtrahend.
+
+    Returns
+    -------
+    norm_diff: same as input
+        Normalized difference between a and b.
+    """
+    norm_diff = (a - b) / (a + b)
+    return norm_diff
 
 def get_credentials(credfile: str = None) -> ConfigObj:
     """
