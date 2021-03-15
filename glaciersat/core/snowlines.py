@@ -1,4 +1,5 @@
 import glaciersat.cfg as cfg
+from typing import Optional, Union, Iterable, Sized
 import xarray as xr
 from skimage import filters
 import logging
@@ -7,8 +8,111 @@ import pandas as pd
 import geopandas as gpd
 from scipy.optimize import least_squares
 from functools import partial
+
 # Module logger
 log = logging.getLogger(__name__)
+
+
+def map_snow_linear_unmixing(
+        ds: xr.Dataset,
+        endmembers: xr.Dataset,
+        date: Optional[pd.Timestamp] = None,
+        roi_shp: Optional[Union[str, gpd.GeoDataFrame]] = None,
+        cloud_mask: Optional[Union[xr.DataArray, np.ndarray]] = None) \
+        -> xr.Dataset:
+    """
+    Map snow on the glacier by linear spectral unmixing.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing an optical satellite image. The image should be
+        given as reflectance, i.e. values between zero and one.
+    endmembers: xr.Dataset
+        Dataset containing the spectral signatures of the endmembers that shall
+        be evaluated. E.g. a Dataset could contain two variables `snow`and
+        `ice` along the 13 Sentinel-2 channels. It must be reflectances, i.e.
+        values (mainly) between zero and one.
+    date: pd.Timestamp or None
+        Date for which to map the snow. Default: None.
+    roi_shp: str or gpd.GeoDataFrame or None
+        Path to a shapefile or geopandas.GeoDataFrame that defines the region
+        of interest on the dataset. Default: None (use all values in the
+        dataset to get the histogram for).
+    cloud_mask: xr.DataArray or np.ndarray, optional
+        Cloud maks for the scene (saves some calculation time, because cloudy
+        areas don't need an evaluation).
+
+    Returns
+    -------
+    member_probs_ds: xr.Dataset
+        Dataset with same spatial dimensions as input `ds`, but variables with
+        the names of the `endmembers`, indicating for each pixels the
+        probability (0-1) to belong to the endmembers.
+    """
+
+    if date is not None:
+        ds = ds.sel(time=date)
+
+    if isinstance(roi_shp, str):
+        roi_shp = salem.read_shapefile(roi_shp)
+
+    bands = ds.bands.values
+
+    # band 10 is missing in L2A - then linalg fails
+    present_bands = \
+    np.where([~np.isnan(ds.bands[b]).all() for b in range(len(ds.band))])[0]
+    bands = bands[present_bands, ...]
+
+    # make a band-aware choice
+    endmember_labels = np.array([k for k, v in endmembers.sel(
+        band=ds.band[present_bands].values).data_vars.items()])
+    endmembers = np.vstack([v.values for k, v in endmembers.sel(
+        band=ds.band[present_bands].values).data_vars.items()])
+
+    # create final array - empty
+    member_probs = np.full((endmembers.shape[0], len(ds.y), len(ds.x)), np.nan)
+
+    # see if we have a cloud mask
+    if cloud_mask is not None:
+        if isinstance(cloud_mask, xr.DataArray):
+            cm_roi = csmask_ds.salem.roi(shape=ol).cmask.values
+        else:
+            cm_roi = cloud_mask.copy()
+    else:
+        # try to get cloud mask from dataset with image
+        if 'cmask' in ds.variables:
+            cm_roi = ds.salem.roi(shape=ol).cmask.values
+        else:
+            log.info('No cloud mask found for spectral unmixing. Assuming no '
+                     'clouds...')
+            cm_roi = np.zeros_like(ds.bands.isel(band=0))  # random band
+
+    # save calculation cost when iterating
+    ds = ds.salem.roi(shape=roi_shp)
+    valid = np.where((~np.isnan(ds.bands[0])) & (cm_roi != 1.))
+
+    # optimize in log space to obtain only positive coefficients
+    end_const = np.log(endmembers.T)
+    print('{} pixels to analyze.'.format(len(valid[0])))
+    for pix in range(len(valid[0])):
+        pi, pj = valid[0][pix], valid[1][pix]
+        ref_const = np.log(bands[:, pi, pj])
+        r1 = np.linalg.lstsq(end_const, ref_const, rcond=-1)[0]
+
+        member_probs[:, pi, pj] = r1
+
+    member_probs = np.exp(member_probs)
+    assert (member_probs[~np.isnan(member_probs)] >= 0.).all()
+
+    # normalize
+    member_probs /= np.sum(member_probs, axis=0)
+
+    member_probs_ds = xr.Dataset(dict([(k, (['y', 'x'], v)) for k, v in
+                                       zip(endmember_labels, member_probs)]),
+                                 coords={'y': ds.y.values, 'x': ds.x.values})
+
+    return member_probs_ds
 
 
 def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
