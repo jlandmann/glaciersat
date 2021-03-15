@@ -1,5 +1,6 @@
-import glaciersat.cfg as cfg
 from typing import Optional, Union, Iterable, Sized
+from glaciersat import utils, cfg
+from glaciersat.core import imagery
 import xarray as xr
 from skimage import filters
 import logging
@@ -765,3 +766,95 @@ def get_model_fit_r_squared(error_func: callable, model_func: callable,
     r_squared = 1 - (ss_res / ss_tot)
 
     return r_squared
+
+
+def generate_endmembers_from_otsu(
+        ds: xr.Dataset, shape: gpd.GeoDataFrame,
+        cloudmask: Optional[xr.Dataset] = None,
+        max_cloudcov: Optional[float] = None,
+        summer_months_minmax: Optional[tuple] = (7, 9)) -> xr.Dataset:
+    """
+    Auto-generate snow/ice endmembers on summer scenes with Otsu thresholding.
+
+    # todo: extend to several endmembers
+    # todo: rule to better exclude "snow/ice only" glaciers (alpha thresholds?)
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Satellite images (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+    shape : gpd.GeoDataFrame
+        Outline as region of interest.
+    cloudmask:
+        Cloud mask to apply: first, to classify the cloud endmembers, but also
+        to exclude clouded areas on the region of interest as good as possible.
+    max_cloudcov: float or None, optional
+        Maximum allowed cloud cover on a scene (ratio between 0 and 1).
+        If None, it is parsed from the configuration. Default: None.
+    summer_months_minmax: tuple or None, optional
+        Which months (number) shall be considered as the 'summer months', i.e.
+        where the glacier should have a snow line? These are taken as the base
+        for estimating the endmembers. Default: (7,9) (July-September).
+
+    Returns
+    -------
+    endmembers: xr.Dataset
+         Dataset containing the endmembers as variables along the `band`
+         coordinate.
+    """
+
+    # we are strict: if no cloud mask available, the script will fail
+    if cloudmask is None:
+        if 'cmask' in ds.variables:
+            cloudmask = ds.cmask
+        else:
+            raise ValueError('Cloud mask must be supplied either with the '
+                             'imagery or as separate argument (to prevent '
+                             'false endmember detection on clouded areas).')
+    if max_cloudcov is None:
+        max_cloudcov = cfg.PARAMS['max_cloud_cover_ratio']
+    summer_range = np.arange(summer_months_minmax[0],
+                             summer_months_minmax[1] + 1)
+
+    # select necessary items and convert
+    image = ds.bands
+    image = image.salem.roi(shape=shape)
+
+    # empty result arrays
+    ref_ice = np.full((len(image.band), len(image.time)), np.nan)
+    ref_snow = np.full((len(image.band), len(image.time)), np.nan)
+    ref_cloud = np.full((len(image.band), len(image.time)), np.nan)
+
+    # we take only all "summer scenes" (they are likely to have a snow line)
+    for it, t in enumerate(image.time.values):
+
+        if pd.Timestamp(t).month not in summer_range:
+            continue
+        cm_roi = cloudmask.sel(time=t).salem.roi(shape=shape).cmask.values
+
+        # Otsu threshold only possible per band - take the overhead
+        for j, b in enumerate(image.band.values):
+            current_band = image.sel(time=t, band=b).values
+            current_band_masked = current_band[
+                ~np.isnan(current_band) & (cm_roi == 0.)]
+            current_band_clouds = current_band[
+                ~np.isnan(current_band) & (cm_roi != 0.)]
+            o_now = filters.threshold_otsu(current_band_masked)
+            median_reflect_ice = np.nanmedian(
+                current_band_masked[current_band_masked < o_now])
+            median_reflect_snow = np.nanmedian(
+                current_band_masked[current_band_masked > o_now])
+
+            # snow and ice only when cloud cover is low
+            if np.nanmean(cm_roi) < max_cloudcov:
+                ref_ice[j, it] = median_reflect_ice
+                ref_snow[j, it] = median_reflect_snow
+            ref_cloud[j, it] = np.nanmedian(current_band_clouds)
+
+    endmembers = xr.Dataset({'snow': (['band'], ref_snow),
+                             'ice': (['band'], ref_ice),
+                             'clouds': (['band'], ref_cloud)},
+                            coords={'band': ds.band.values})
+    return endmembers
+
