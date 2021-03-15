@@ -2,6 +2,7 @@ from configobj import ConfigObj, ConfigObjError
 import os
 import sys
 import numpy as np
+from scipy import ndimage
 import xarray as xr
 from typing import Union, Iterable, Tuple
 
@@ -58,6 +59,88 @@ def rescale(data: Union[float, np.array, xr.DataArray],
         zero to one between the `thresholds`.
     """
     return (data - (thresholds[0])) / (thresholds[1] - thresholds[0])
+
+
+def declutter(data: np.ndarray, n_erode: int, n_dilate: int) -> np.ndarray:
+    """
+    Remove clutter from data.
+
+    The data should be structured such that all values equal to one. If the
+    value for `n_erode` or `n_dilate` is 1, then nothign is changed.
+
+    Parameters
+    ----------
+    data : np.ndarray
+         Array with data containing zeros and ones.
+    n_erode : int
+         How many pixels shall be eroded, i.e. which is the minimum square side
+         length of features that shall survive?
+    n_dilate : int
+         After erosion, how much shall the remaining features be dilated again?
+
+    Returns
+    -------
+    decluttered: np.ndarray
+        Input array, but with small features removed.
+    """
+
+    decluttered = ndimage.binary_dilation(
+        ndimage.binary_erosion(data, np.ones((n_erode, n_erode))),
+        np.ones((n_dilate, n_dilate))
+                                     )
+    return decluttered
+
+
+def retry(exceptions: Union[str, Iterable, tuple, Exception], tries=100,
+          delay=60, backoff=1, log_to=None):
+    """
+    Retry decorator calling the decorated function with an exponential backoff.
+
+    Amended from Python wiki [1]_ and calazan.com [2]_.
+
+    Parameters
+    ----------
+    exceptions: str or tuple or Exception
+        The exception to check. May be a tuple of exceptions to check. If just
+        `Exception` is provided, it will retry after any Exception.
+    tries: int
+        Number of times to try (not retry) before giving up. Default: 100.
+    delay: int or float
+        Initial delay between retries in seconds. Default: 60.
+    backoff: int or float
+        Backoff multiplier (e.g. value of 2 will double the delay
+        each retry). Default: 1 (no increase).
+    log_to: logging.logger
+        Logger to use. If None, print.
+
+    References
+    -------
+    .. [1] https://bit.ly/2NMpF2j
+    .. [2] https://bit.ly/3e6FIT9
+    """
+    def deco_retry(f):
+
+        @wraps(f)
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 1:
+                try:
+                    return f(*args, **kwargs)
+                except exceptions as e:
+                    msg = '{}, Retrying in {} seconds...'.format(e, mdelay)
+                    if log_to:
+                        log_to.warning(msg)
+                    else:
+                        print(msg)
+                    time.sleep(mdelay)
+                    mtries -= 1
+                    mdelay *= backoff
+            return f(*args, **kwargs)
+
+        return f_retry  # true decorator
+
+    return deco_retry
+
 
 def get_credentials(credfile: str = None) -> ConfigObj:
     """
