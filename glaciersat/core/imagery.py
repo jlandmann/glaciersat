@@ -825,3 +825,172 @@ def ndmi(nir: Union[xr.DataArray, np.ndarray, float, int],
         Normalised difference moisture index.
     """
     return utils.normalized_difference(nir, swir1)
+
+
+def hollstein_fig5_shadow_class(
+        image: Union[xr.Dataset, S2Image]) -> xr.DataArray:
+    """
+    Calculating shadows according to [Hollstein et al. (2016)]_, fig. 5.
+
+    # todo: this currently works for SEN-2 only
+
+    Parameters
+    ----------
+    image : xr.Dataset or imagery.S2Image
+        The Sentinel satellite image (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+
+    Returns
+    -------
+    xr.DataArray
+        Boolean mask with shadows as True.
+
+    References
+    ----------
+    .. [Hollstein et al. (2016)]: Hollstein, A., Segl, K., Guanter, L., Brell,
+        M., & Enesco, M. (2016). Ready-to-use methods for the detection of
+        clouds, cirrus, snow, shadow, water and clear sky pixels in Sentinel-2
+        MSI images. Remote Sensing, 8(8), 666.
+    """
+
+    if isinstance(image, S2Image):
+        image = image.data
+
+    green = image.bands.sel(band='B03')
+    nir_comp = image.bands.sel(band='B8A')
+
+    return (green < 0.325) & (nir_comp < 0.166) & (nir_comp > 0.039)
+
+
+def hollstein_fig6_shadow_class(
+        image: Union[xr.Dataset, S2Image]) -> xr.DataArray:
+    """
+    Calculating shadows according to [Hollstein et al. (2016)]_, fig. 6.
+
+    # todo: this currently works for SEN-2 only
+
+    Parameters
+    ----------
+    image : xr.Dataset or imagery.S2Image
+        The Sentinel satellite image (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+
+    Returns
+    -------
+    xr.DataArray
+        Boolean mask with shadows as True.
+
+    References
+    ----------
+    .. [Hollstein et al. (2016)]: Hollstein, A., Segl, K., Guanter, L., Brell,
+        M., & Enesco, M. (2016). Ready-to-use methods for the detection of
+        clouds, cirrus, snow, shadow, water and clear sky pixels in Sentinel-2
+        MSI images. Remote Sensing, 8(8), 666.
+    """
+
+    if isinstance(image, S2Image):
+        image = image.data
+
+    nir_comp = image.bands.sel(band='B8A')
+    vre2 = image.bands.sel(band='B06')
+    green = image.bands.sel(band='B03')
+    swir2 = image.bands.sel(band='B12')
+    wv = image.bands.sel(band='B09')
+
+    path1 = (nir_comp < 0.156) & ((vre2 - green) < -0.025) & (
+            (swir2 - wv) < -0.016)
+    path2 = (nir_comp < 0.156) & ((vre2 - green) > -0.025) & (
+            (swir2 - wv) < 0.084)
+    return path1 | path2
+
+
+def hollstein_fig7_shadow_class(
+        image: Union[xr.Dataset, S2Image]) -> xr.DataArray:
+    """
+    Calculating shadows according to [Hollstein et al. (2016)]_, fig. 7.
+
+    # todo: this currently works for SEN-2 only
+
+    Parameters
+    ----------
+    image : xr.Dataset or imagery.S2Image
+        The Sentinel satellite image (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+
+    Returns
+    -------
+    xr.DataArray
+        Boolean mask with shadows as True.
+
+    References
+    ----------
+    .. [Hollstein et al. (2016)]: Hollstein, A., Segl, K., Guanter, L., Brell,
+        M., & Enesco, M. (2016). Ready-to-use methods for the detection of
+        clouds, cirrus, snow, shadow, water and clear sky pixels in Sentinel-2
+        MSI images. Remote Sensing, 8(8), 666.
+    """
+    if isinstance(image, S2Image):
+        image = image.data
+
+    nir_comp = image.bands.sel(band='B8A')
+    wv = image.bands.sel(band='B09')
+    blue = image.bands.sel(band='B02')
+    green = image.bands.sel(band='B03')
+    swirc = image.bands.sel(band='B10')
+    swir2 = image.bands.sel(band='B12')
+
+    path1 = (nir_comp < 0.181) & (nir_comp < 0.051) & (wv < 0.01) & (
+            blue < 0.073)
+    path2 = (nir_comp < 0.181) & (nir_comp < 0.051) & (wv > 0.01) & (
+            green < 0.074)
+    path3 = (nir_comp < 0.181) & (nir_comp > 0.051) & (swir2 < 0.097) & (
+            swirc < 0.011)
+    path4 = (nir_comp < 0.181) & (nir_comp > 0.051) & (swir2 > 0.097) & (
+            swirc > 0.010)
+    return path1 | path2 | path3 | path4
+
+
+def hollstein_fig8_shadow_class(
+        image: Union[xr.Dataset, S2Image]) -> xr.DataArray:
+    """
+    Calculating shadows according to [Hollstein et al. (2016)]_, fig. 8.
+
+    # todo: this currently works for SEN-2 only
+
+    Parameters
+    ----------
+    image : xr.Dataset or imagery.S2Image
+        The Sentinel satellite image (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+
+    Returns
+    -------
+    xr.DataArray
+        Boolean mask with shadows as True.
+
+    References
+    ----------
+    .. [Hollstein et al. (2016)]: Hollstein, A., Segl, K., Guanter, L., Brell,
+        M., & Enesco, M. (2016). Ready-to-use methods for the detection of
+        clouds, cirrus, snow, shadow, water and clear sky pixels in Sentinel-2
+        MSI images. Remote Sensing, 8(8), 666.
+    """
+
+    if isinstance(image, S2Image):
+        image = image.data
+
+    green = image.bands.sel(band='B03')
+    nir_comp = image.bands.sel(band='B8A')
+    vre3 = image.bands.sel(band='B07')
+    wv = image.bands.sel(band='B09')
+    swir1 = image.bands.sel(band='B11')
+    vre1 = image.bands.sel(band='B05')
+    ca = image.bands.sel(band='B01')
+
+    path1 = (green < 0.319) & (nir_comp < 0.166) & ((green - vre3) < 0.027) & (
+            (wv - swir1) > -0.097)
+    path2 = (green < 0.319) & (nir_comp < 0.166) & ((green - vre3) > 0.027) & (
+            (wv - swir1) > 0.021)
+    path3 = (green > 0.319) & ((vre1 / swir1) > 4.33) & (green < 0.525) & (
+            (ca / vre1) > 1.184)
+    return path1 | path2 | path3
