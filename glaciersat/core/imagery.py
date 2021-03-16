@@ -87,9 +87,16 @@ class S2ImageMeta(SatelliteImageMeta):
         self.platform = fname_split[0]
         self.proc_level = fname_split[1][3:]
 
-        cm_path = glob(os.path.join(path, '**', '**', '**',
-                                    'MSK_CLOUDS_B00.gml'))
-        print('CM: ', cm_path)
+        if self.proc_level.lower() == 'l1c':
+            cm_path = glob(os.path.join(path, '**', '**', '**',
+                                        'MSK_CLOUDS_B00.gml'))
+        elif self.proc_level.lower() == 'l2a':
+            cm_path = glob(os.path.join(self.path, '**', '**', '**', 'R20m',
+                                        '*SCL_20m.jp2'))[0]
+        else:
+            cm_path = []
+            log.warning('Unknown processing level: no cloud mask file found.')
+
         if len(cm_path) == 0:
             self.cloud_mask = None
         else:
