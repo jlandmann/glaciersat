@@ -59,6 +59,63 @@ class SatelliteImageMeta:
     def load_data(self):
         return SatelliteImage(path=self.path)
 
+    def get_scene_footprint(self, fp_path: str) -> None:
+        """
+        Ducktyping interface to get a scene footprint.
+
+        Parameters
+        ----------
+        fp_path : str
+            Path to scene footprint.
+
+        Returns
+        -------
+        None
+        """
+        raise NotImplementedError
+
+    def overlaps_shape(self, shape: Union[str, gpd.GeoDataFrame],
+                       percentage: float = 100.):
+        """
+        Check if the satellite image overlaps a shape by a given percentage.
+
+        Parameters
+        ----------
+        shape: str od gpd.GeoDataFrame
+             Path to shapefile or geopandas.GeoDataFrame for region of
+             interest, e.g. a glacier outline.
+        percentage : float, optional
+             Percentage of `shape` that should intersect the satellite image
+             scene footprint. Default: 100 (satellite image has to **contain**
+             `shape` fully).
+
+        Returns
+        -------
+        overlap_bool: bool
+            Whether or not the scene footprint contains the given percentage of
+            the shape.
+        """
+        if isinstance(shape, str):
+            shape = salem.read_shapefile(shape)
+
+        ratio = percentage / 100.
+        if ratio == 1.:
+            overlap_bool = self.scene_footprint.contains(
+                shape.to_crs(self.scene_footprint.crs)).item()
+        elif 0. < ratio < 1.:
+            shape_reproj = shape.to_crs(self.scene_footprint.crs)
+            shape_area = shape_reproj.area.item()
+            intsct_area = self.scene_footprint.intersection(
+                shape_reproj).area.item()
+            if (intsct_area / shape_area) >= ratio:
+                overlap_bool = True
+            else:
+                overlap_bool = False
+        else:
+            raise ValueError("Overlap percentage must be between 0 und 100.")
+
+        return overlap_bool
+
 
 class S2ImageMeta(SatelliteImageMeta):
     """
@@ -113,47 +170,6 @@ class S2ImageMeta(SatelliteImageMeta):
 
     def load_data(self):
         return S2Image(safe_path=self.path)
-
-    def overlaps_shape(self, shape, percentage=100.):
-        """
-        Check if the satellite image overlaps a shape by a given percentage.
-
-        Parameters
-        ----------
-        shape: str od gpd.GeoDataFrame
-             Path to shapefile or geopandas.GeoDataFrame for region of
-             interest, e.g. a glacier outline.
-        percentage : float, optional
-             Percentage of `shape` that should intersect the satellite image
-             scene footprint. Default: 100. (satellite image has to **contain**
-             `shape` fully)
-
-        Returns
-        -------
-        overlap_bool: bool
-            Whether or not the scene footprint contains the given percentage of
-            the shape.
-        """
-        if isinstance(shape, str):
-            shape = salem.read_shapefile(shape)
-
-        ratio = percentage / 100.
-        if ratio == 1.:
-            overlap_bool = self.scene_footprint.contains(
-                shape.to_crs(self.scene_footprint.crs)).item()
-        elif 0. < ratio < 1.:
-            shape_reproj = shape.to_crs(self.scene_footprint.crs)
-            shape_area = shape_reproj.area.item()
-            intsct_area = self.scene_footprint.intersection(
-                shape_reproj).area.item()
-            if (intsct_area / shape_area) >= ratio:
-                overlap_bool = True
-            else:
-                overlap_bool = False
-        else:
-            raise ValueError("Overlap percentage must be between 0 und 100.")
-
-        return overlap_bool
 
     def get_scene_footprint(self, fp_path: str) -> None:
         """
@@ -243,8 +259,11 @@ class LandsatImageMeta(SatelliteImageMeta):
     def load_data(self):
         return LandsatImage(path=self.path)
 
+    def get_scene_footprint(self, fp_path: str) -> None:
+        raise NotImplementedError
 
-class SatelliteImage:
+
+class SatelliteImage(SatelliteImageMeta):
     """
     Base class for satellite images.
 
@@ -275,6 +294,7 @@ class SatelliteImage:
     """
 
     def __init__(self, ds=None, path=None):
+        super().__init__(path=path)
 
         if ds is not None:
             self.data = ds
@@ -331,52 +351,11 @@ class SatelliteImage:
         """
         raise NotImplementedError
 
-    def overlaps_shape(self, shape, percentage=100.):
-        """
-        Check if the satellite image overlaps a shape by a given percentage.
 
-        Parameters
-        ----------
-        shape: str od gpd.GeoDataFrame
-             Path to shapefile or geopandas.GeoDataFrame for region of
-             interest, e.g. a glacier outline.
-        percentage : float, optional
-             Percentage of `shape` that should intersect the satellite image
-             scene footprint. Default: 100. (satellite image has to **contain**
-             `shape` fully)
-
-        Returns
-        -------
-        overlap_bool: bool
-            Whether or not the scene footprint contains the given percentage of
-            the shape.
-        """
-        if isinstance(shape, str):
-            shape = salem.read_shapefile(shape)
-
-        ratio = percentage / 100.
-        if ratio == 1.:
-            overlap_bool = self.scene_footprint.contains(
-                shape.to_crs(self.scene_footprint.crs)).item()
-        elif 0. < ratio < 1.:
-            shape_reproj = shape.to_crs(self.scene_footprint.crs)
-            shape_area = shape_reproj.area.item()
-            intsct_area = self.scene_footprint.intersection(
-                shape_reproj).area.item()
-            if (intsct_area / shape_area) >= ratio:
-                overlap_bool = True
-            else:
-                overlap_bool = False
-        else:
-            raise ValueError("Overlap percentage must be between 0 und 100.")
-
-        return overlap_bool
-
-
-class S2Image(SatelliteImage):
+class S2Image(S2ImageMeta):
 
     def __init__(self, ds=None, safe_path=None):
-        super().__init__(ds=ds, path=safe_path)
+        super().__init__(path=safe_path)
 
         self.band_names = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07',
                            'B08', 'B09', 'B10', 'B11', 'B12', 'B8A']
@@ -501,23 +480,22 @@ class S2Image(SatelliteImage):
 
         # save disk space when writing later
         all_bands.encoding.update(
-            {'dtype': 'int16', 'scale_factor': 1e-5, '_FillValue': -9999,
+            {'dtype': 'int16', 'scale_factor': 1., '_FillValue': -9999,
              'zlib': True})
+
+        all_bands = all_bands.to_dataset(name='bands', promote_attrs=True)
 
         # process cloud mask
         self.cloud_mask = self.get_cloud_mask()
 
-        # should not happen
-        if self.cloud_mask is None:
-            all_bands = all_bands.to_dataset(name='bands',
-                                             promote_attrs=True)
-        else:
+        # should be the standard
+        if self.cloud_mask is not None:
             cmask_da = self.cloud_mask.copy(deep=True)
             cmask_da = cmask_da.expand_dims(dim='time')
             cmask_da = cmask_da.assign_coords(time=(['time'], [date]))
             # attrs should be the same anyway, but first has 'pyproj_srs'
             all_bands = xr.merge([all_bands, cmask_da],
-                                 combine_attrs='no_conflicts')
+                                 combine_attrs='override')
 
         # process scene footprint
         # todo: we take B01 as representative for all others: ok?
@@ -589,7 +567,7 @@ class S2Image(SatelliteImage):
         # 9 (high cloud prob.)
         # todo: check 6 (cloud shadows on glaciers sometimes interpreted as water)
         cmask = xr.where((scene_class == 2) | (scene_class == 3) |
-                            (scene_class == 8) | (scene_class == 9), 1, 0)
+                         (scene_class == 8) | (scene_class == 9), 1, 0)
         cmask.attrs['pyproj_srs'] = scene_class.attrs['pyproj_srs']
         cmask = self.grid.to_dataset().salem.transform(
             cmask.to_dataset(name='cmask'))
@@ -601,11 +579,16 @@ class S2Image(SatelliteImage):
 
         Parameters
         ----------
-        cm_path :
+        cm_path : str or None
+            Path to cloud mask (either *.GML for L1C processing or *.jp2 for
+            L2A processing) or None. If None, try to find path based on
+            processing level and the *.SAFE data structure. Default: None.
 
         Returns
         -------
-
+        None or cmask: None or xr.DataArray
+            None if the cloud mask could not be found (should not happen), or
+            an xr.DataArray with the cloud mask.
         """
 
         if cm_path is not None:
@@ -646,25 +629,6 @@ class S2Image(SatelliteImage):
              'zlib': True})
 
         return cmask
-
-    def get_scene_footprint(self, fp_path: str) -> None:
-        """
-        Get and unify a Sentinel *.GML scene footprint.
-
-        Parameters
-        ----------
-        fp_path : str
-            Path to a *.GML file containing a Sentinel scene footprint.
-
-        Returns
-        -------
-        None
-        """
-        fp = gpd.read_file(fp_path)
-        fp_union = fp.unary_union
-        fp_gdf = gpd.GeoSeries(fp_union, crs=fp.crs)
-
-        self.scene_footprint = fp_gdf
 
     def get_ensemble_albedo(self, return_ds: bool = False) -> \
             xr.Dataset or SatelliteImage:
@@ -1054,8 +1018,9 @@ def additional_threshold_to_find_more_snow_in_shadow(
         image = image.data
     # based on comparing histograms
     return (image.bands.sel(band='B01') > 0.331) & (
-            image.bands.sel(band='B09') > 0.294) & ((image.bands.sel(
-        band='B01') - image.bands.sel(band='B10')) > 0.294)
+            image.bands.sel(band='B09') > 0.294) & (
+            (image.bands.sel(band='B01') -
+             image.bands.sel(band='B10')) > 0.294)
 
 
 def cloudmask_based_on_moisture(
@@ -1116,7 +1081,7 @@ def esa_partial_cloud_probability(
         snow_ix = image.get_ndsi()
     elif isinstance(image, xr.Dataset):
         snow_ix = ndsi(image.bands.sel(band='B03'),
-                            image.bands.sel(band='B11'))
+                       image.bands.sel(band='B11'))
     else:
         raise NotImplementedError(
             'Only an `imagery.S2Image` or `xr.Dataset` are accepted to '
@@ -1171,13 +1136,11 @@ def geeguide_cloud_mask(
         image.sel(band='B04') + image.sel(band='B03') + image.sel(band='B02'),
         [0.2, 0.8])], axis=0)
 
-    ndmi = utils.normalized_difference(image.sel(band='B8A'),
-                                       image.sel(band='B11'))
-    score = np.min([score, utils.rescale(ndmi, [-0.1, 0.1])], axis=0)
+    moist_index = ndmi(image.sel(band='B8A'), image.sel(band='B11'))
+    score = np.min([score, utils.rescale(moist_index, [-0.1, 0.1])], axis=0)
 
-    ndsi = utils.normalized_difference(image.sel(band='B03'),
-                                       image.sel(band='B11'))
-    score = np.min([score, utils.rescale(ndsi, [0.8, 0.6])], axis=0)
+    snow_index = ndsi(image.sel(band='B03'), image.sel(band='B11'))
+    score = np.min([score, utils.rescale(snow_index, [0.8, 0.6])], axis=0)
 
     score[score < 1.] = 0.
 
@@ -1225,14 +1188,12 @@ def zeller_cloud_score(
         [0.2, 0.8]).values], axis=0)
 
     # Clouds are moist
-    ndmi = utils.normalized_difference(image.sel(band='B08').values,
-                                       image.sel(band='B11').values)
-    score = np.min([score, utils.rescale(ndmi, [-0.1, 0.1])], axis=0)
+    moist_index = ndmi(image.sel(band='B08').bands, image.sel(band='B11').bands)
+    score = np.min([score, utils.rescale(moist_index, [-0.1, 0.1])], axis=0)
 
     # However, clouds are not snow.
-    ndsi = utils.normalized_difference(image.sel(band='B03'),
-                                       image.sel(band='B11').values)
-    score = np.min([score, utils.rescale(ndsi, [0.4, 0.1])], axis=0)
+    snow_index = ndsi(image.sel(band='B03').bands, image.sel(band='B11').bands)
+    score = np.min([score, utils.rescale(snow_index, [0.4, 0.1])], axis=0)
 
     return score
 
