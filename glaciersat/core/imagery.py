@@ -106,6 +106,11 @@ class S2ImageMeta(SatelliteImageMeta):
             #self.cloud_mask = self.get_cloud_mask_from_gml(cm_path[0])
             #self.cloud_area_percent = (np.sum(self.cloud_mask == 1)/ self.cloud_mask.size) * 100
 
+        # parse mean sun zenith and azimuth
+        mz, ma = self.get_mean_scene_sun_angles()
+        self.mean_zenith_deg = mz
+        self.mean_azimuth_deg = ma
+
     def load_data(self):
         return S2Image(safe_path=self.path)
 
@@ -168,6 +173,23 @@ class S2ImageMeta(SatelliteImageMeta):
         fp_gdf = gpd.GeoSeries(fp_union, crs=fp.crs)
 
         self.scene_footprint = fp_gdf
+
+    def get_mean_scene_sun_angles(self):
+        """
+        Parse mean solar zenith and azimuth angle from metadata.
+
+        Returns
+        -------
+        mean_zen, mean_azi: float, float
+            Mean scene solar zenith and azimuth angles
+        """
+
+        xml_meta = utils.read_xml(
+            glob(os.path.join(self.path, '**', '**', 'MTD_TL.xml'))[0])
+        mean_zen = float(xml_meta.findall("*/*/*/ZENITH_ANGLE")[0].text)
+        mean_azi = float(xml_meta.findall("*/*/*/AZIMUTH_ANGLE")[0].text)
+
+        return mean_zen, mean_azi
 
     def get_cloud_mask_from_gml(self, cmask_path: str) -> np.ndarray:
         """
