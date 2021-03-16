@@ -40,7 +40,7 @@ def normalized_difference(a: Union[int, float, np.array, xr.DataArray],
 
 
 def rescale(data: Union[float, np.array, xr.DataArray],
-            thresholds: Tuple[float, float]) -> \
+            thresholds: Union[List[float], Tuple[float, float]]) -> \
         Union[float, np.array, xr.DataArray]:
     """
     Rescale some data to given thresholds, so that data ranges now from 0 to 1.
