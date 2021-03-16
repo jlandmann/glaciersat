@@ -1,10 +1,20 @@
+import glaciersat.cfg as cfg
+from sentinelsat import SentinelAPI
 from configobj import ConfigObj, ConfigObjError
+import zipfile
+import shapely
+import salem
+import pandas as pd
 import os
 import sys
 import numpy as np
 from scipy import ndimage
 import xarray as xr
-from typing import Union, Iterable, Tuple
+from xml.etree import ElementTree
+from functools import wraps
+from collections import OrderedDict
+import time
+from typing import Union, Iterable, Tuple, List
 
 import logging
 # Logging options
@@ -170,3 +180,22 @@ def get_credentials(credfile: str = None) -> ConfigObj:
 
     return cr
 
+
+def read_xml(filename: str):
+    """
+    Read a *.XML file at the basic level.
+
+    This is useful e.g. for the Sentinel-2 metadata, which are stored as an
+    XML file.
+
+    Parameters
+    ----------
+    filename : str
+        Path to the *.XML file.
+
+    Returns
+    -------
+    xml.etree.ElementTree:
+        An ElementTree object containing the parsed xml data.
+    """
+    return ElementTree.parse(filename)
