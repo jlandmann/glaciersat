@@ -525,14 +525,14 @@ class S2Image(S2ImageMeta):
         """
         try:
             cmask = gpd.read_file(cmask_path)
+
+            cmask_u = cmask.unary_union
+            cmask_raster = self.grid.region_of_interest(geometry=cmask_u,
+                                                        crs=cmask.crs)
         except ValueError:  # Fiona ValueError: Null layer: '' when empty
             # assume no clouds then (mask of Zeros)
             cmask_raster = self.grid.region_of_interest()
-            return cmask_raster
 
-        cmask_u = cmask.unary_union
-        cmask_raster = self.grid.region_of_interest(geometry=cmask_u,
-                                                    crs=cmask.crs)
         cmask_da = xr.DataArray(
             cmask_raster,
             coords={'x': self.grid.x_coord, 'y': self.grid.y_coord},
