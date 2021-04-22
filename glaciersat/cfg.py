@@ -127,9 +127,17 @@ def initialize(file=None):
     PARAMS[k] = [str(vk) for vk in cp.as_list(k)]
     k = 'cloudcover_range'
     PARAMS[k] = [float(vk) for vk in cp.as_list(k)]
+    k = 'cloud_heights_range'
+    PARAMS[k] = [float(vk) for vk in cp.as_list(k)]
+    k = 'erode_n_pixels'
+    PARAMS[k] = cp.as_int(k)
+    k = 'dilate_n_pixels'
+    PARAMS[k] = cp.as_int(k)
 
     # Delete non-floats
-    ltr = ['landsat8_tiles_ch', 'sentinel2_tiles_ch', 'cloudcover_range']
+    ltr = ['sentinel_download_path', 'landsat8_tiles_ch', 'sentinel2_tiles_ch',
+           'cloudcover_range', 'cloud_heights_range', 'dilate_n_pixels',
+           'erode_n_pixels']
     for k in ltr:
         cp.pop(k, None)
 
