@@ -20,7 +20,8 @@ jobs:
           - py39-all-rc
         use-mpl:
           - "--mpl"
-    runs-on: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash -leo pipefail {0}
