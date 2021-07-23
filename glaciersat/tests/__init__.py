@@ -17,4 +17,4 @@ if os.path.exists(cred_path):
 def requires_credentials(test):
     """Test decorator to make it require login credentials."""
     msg = 'This test requires credentials'
-    return test if HAS_CREDENTIALS else pytest.skip(msg)
+    return test if HAS_CREDENTIALS else pytest.mark.skip(msg)
