@@ -134,6 +134,8 @@ def initialize(file=None):
     k = 'dilate_n_pixels'
     PARAMS[k] = cp.as_int(k)
 
+    PATHS['sentinel_download_path'] = cp['sentinel_download_path']
+
     # Delete non-floats
     ltr = ['sentinel_download_path', 'landsat8_tiles_ch', 'sentinel2_tiles_ch',
            'cloudcover_range', 'cloud_heights_range', 'dilate_n_pixels',

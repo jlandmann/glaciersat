@@ -6,6 +6,7 @@ import shapely
 import salem
 import pandas as pd
 import os
+import glob
 import sys
 import numpy as np
 from scipy import ndimage
@@ -14,7 +15,7 @@ from xml.etree import ElementTree
 from functools import wraps
 from collections import OrderedDict
 import time
-from typing import Union, Iterable, Tuple, List
+from typing import Union, Iterable, Tuple, List, Optional
 
 import logging
 # Logging options
@@ -199,3 +200,191 @@ def read_xml(filename: str):
         An ElementTree object containing the parsed xml data.
     """
     return ElementTree.parse(filename)
+
+
+def setup_sentinel_api():
+    """
+    Set up a Sentinel API to interface with Sentinel data on Copernicus Hub.
+
+    Returns
+    -------
+    api: sentinelsat.SentinelAPI
+        An interface.
+    """
+    cr = get_credentials(os.path.join(
+        os.path.abspath(os.path.dirname(os.path.dirname(__file__))),
+        '.credentials'))
+
+    api = SentinelAPI(cr['sentinel']['user'], cr['sentinel']['password'],
+        api_url="https://apihub.copernicus.eu/apihub/")
+
+    return api
+
+
+def download_sentinel_tiles(
+        date_begin: pd.Timestamp, date_end: pd.Timestamp, tiles: list,
+        platform: str = 'Sentinel-2', producttype: str = 'auto',
+        cloudcov_min_pct: Optional[float] = None,
+        cloudcov_max_pct: Optional[float] = None,
+        download_base_dir: Optional[str] = None) -> tuple[
+    OrderedDict, dict, dict, dict]:
+    """
+    Download some Sentinel tiles as specified by tiles and a time span.
+
+    Parameters
+    ----------
+    date_begin : pd.Timestamp
+        Begin date of the time span for which the tiles shall be downloaded.
+    date_end : pd.Timestamp
+        End date of the time span for which the tiles shall be downloaded.
+    tiles : list
+        List with tiles names as strings, e.g. ['32TMS', '32TLR'].
+    platform : str
+        Which platform shall be downloaded. Default: 'Sentinel-2' (optical
+        imagery).
+    producttype : str
+        Which product type shall be downloaded, i.e. which sensor and
+        processing level. Allowed are 'S2MSI1C', 'S2MSI2A' and 'auto'. If
+        'auto', then the download choice is made based on the availability.
+        After 2018-03-31 level 2A data (bottom fo atmosphere reflectance) will
+        be downloaded, while before level 1C data (top of atmosphere
+        reflectance) will be downloaded. Default: 'auto'.
+    cloudcov_min_pct : float
+        Minimum allowed cloud cover percentage. Default: None (no limit;
+        recommended).
+    cloudcov_max_pct : float
+        Maximum allowed cloud cover percentage. Default: None (no limit).
+    download_base_dir : str
+        Top-level download directory for the data.
+
+    Returns
+    -------
+    products, downloaded, triggered, failed: OrderedDict, list, list, list
+    """
+
+    if cloudcov_min_pct is None:
+        cloudcov_min_pct = cfg.PARAMS['cloudcover_range'][0]
+    if cloudcov_max_pct is None:
+        cloudcov_max_pct = cfg.PARAMS['cloudcover_range'][1]
+    if download_base_dir is None:
+        download_base_dir = cfg.PATHS['sentinel_download_path']
+
+    # first thing to do
+    api = setup_sentinel_api()
+
+    # L2A starts only later - we try to get the best possible
+    if producttype == 'auto':
+        # date when ESA started supplying L2A
+        l2a_begin_date = pd.Timestamp('2018-04-01')
+        if (date_begin < l2a_begin_date) and (date_end < l2a_begin_date):
+            producttype = 'S2MSI1C'
+        elif (date_begin >= l2a_begin_date) and (date_end >= l2a_begin_date):
+            producttype = 'S2MSI2A'
+        elif (date_begin < l2a_begin_date) and (date_end >= l2a_begin_date):
+            # call two times
+            download_sentinel_tiles(
+                date_begin, l2a_begin_date - pd.Timedelta(days=1), tiles=tiles,
+                platform=platform, producttype='S2MSI1C')
+            download_sentinel_tiles(
+                date_begin, l2a_begin_date, tiles=tiles, platform=platform,
+                producttype='S2MSI2A')
+
+    query_kwargs = {'platformname': platform, 'producttype': producttype,
+                    'date': (date_begin, date_end),
+                    'cloudcoverpercentage': "[{} TO {}]".format(
+                                cloudcov_min_pct,
+                                cloudcov_max_pct)
+                                }
+
+    products = OrderedDict()
+    for tile in tiles:
+        kw = query_kwargs.copy()
+        #kw['tileid'] = tile  # products after 2017-03-31
+        # search by tiles for S2A needs this line as well:
+        kw['filename'] = f'*_T{tile}_*'
+        pp = api.query(**kw)
+        products.update(pp)
+    log.info('{} products found.'.format(len(products)))
+
+    downloaded = {}
+    triggered = {}
+    failed = {}
+    if len(products) == 0:
+        return products, downloaded, triggered, failed
+
+    @retry(Exception, tries=100, delay=3600)
+    def dl_all(*args, **kwargs):
+        log.info('Trying to download {} products...'.format(products))
+        d, t, f = api.download_all(*args, **kwargs)
+        log.info('{} downloaded, {} triggered, {} failed.'.format(
+            len(d), len(t), len(f)))
+        return d, t, f
+
+    # create download path if it does not yet exist
+    platform_short = (platform[0] + platform[-1]).lower()
+    dl_dir = os.path.join(download_base_dir, platform_short,
+        producttype[-2:].lower())
+    if not os.path.exists(dl_dir):
+        os.makedirs(dl_dir)
+
+    downloaded, triggered, failed = dl_all(
+        products, directory_path=dl_dir)
+    downloaded.update(downloaded)
+    failed.update(failed)
+
+    return products, downloaded, triggered, failed
+
+
+
+def unzip_sentinel(path: Optional[str] = None, remove_zip: bool = True):
+    """
+    Unzip some downloaded Sentinel zipped files.
+
+    This function either takes the path to a file or to an entire directory.
+    Raises warnings, when "bad zip files" are encountered, which was once a
+    server side issue.
+    
+    Parameters
+    ----------
+    path : str, optional
+        File path or directory that shall be unzipped. If a directory is given,
+        the entire path with all (!) subdirectories are searched for zip file
+        and all of them are unzipped. Default: None (take
+        cfg.PATHS['sentinel_download_path'].
+    remove_zip : bool
+        Whether or not the zipped file shall be removed after extraction.
+        Default: True.
+
+    Returns
+    -------
+    None
+    """
+    if path is None:
+        path = cfg.PATHS['sentinel_download_path']
+
+    if os.path.isdir(path):
+        zippaths = glob.glob(os.path.join(path, '**', '*.zip'), recursive=True)
+    elif os.path.isfile(path):
+        zippaths = [path]
+    else:
+        raise ValueError('`Path` has to be either a directory containing zip '
+                         'files or a zip file itself.')
+
+    bad_zips = []
+    for zp in zippaths:
+        dirname = os.path.dirname(zp)
+        try:
+            with zipfile.ZipFile(zp) as zip_file:
+                log.info('Extracting {} ...'.format(os.path.basename(zp)))
+                zip_file.extractall(dirname)
+            if remove_zip is True:
+                os.remove(zp)
+        except zipfile.BadZipfile:
+            log.warning('Bad zip File: {}'.format(os.path.basename(zp)))
+            bad_zips.append(zp)
+            continue
+
+    if len(bad_zips) > 0.:
+        # should be resolved, but who knows:
+        # https://scihub.copernicus.eu/news/News00893
+        log.warning('Found bad zip files: {}'.format(bad_zips))
