@@ -109,9 +109,11 @@ def map_snow_linear_unmixing(
     # normalize
     member_probs /= np.sum(member_probs, axis=0)
 
-    member_probs_ds = xr.Dataset(dict([(k, (['y', 'x'], v)) for k, v in
-                                       zip(endmember_labels, member_probs)]),
-                                 coords={'y': ds.y.values, 'x': ds.x.values})
+    member_probs_ds = xr.Dataset(dict(
+        [(k, (['y', 'x', 'map_method'], v[..., None])) for k, v in
+         zip(endmember_labels, member_probs)]),
+                                 coords={'y': ds.y.values, 'x': ds.x.values,
+                                         'map_method': ['lsu']})
 
     return member_probs_ds
 
