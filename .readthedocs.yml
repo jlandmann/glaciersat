@@ -5,9 +5,7 @@ sphinx:
    configuration: docs/conf.py
 
 build:
-   os: ubuntu-20.04
-   tools:
-     python: mambaforge-4.10
+  image: latest
 
 conda:
     environment: ci/requirements-py39-all.yml
