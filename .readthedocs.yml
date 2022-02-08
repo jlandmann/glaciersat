@@ -10,10 +10,12 @@ build:
 conda:
     environment: ci/requirements-py39-all.yml
 
-python:
-    version: 3.8
-    install:
-      - method: setuptools
-        path: .
+sphinx:
+  fail_on_warning: false
 
+python:
+  # Install our python package before building the docs
+  install:
+    - method: pip
+      path: .
 formats: []
