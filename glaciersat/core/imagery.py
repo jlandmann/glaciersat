@@ -35,6 +35,7 @@ class SatelliteImageMeta:
         self.cloud_area_percent = None
         self.proc_level = None
         self.date = None
+        self.is_meta = True
 
     def __repr__(self):
 
@@ -313,6 +314,7 @@ class SatelliteImage(SatelliteImageMeta):
         self.cloud_mask = None
         self.cloud_area_percent = None
         self.proc_level = None
+        self.is_meta = False
 
     def __repr__(self):
 
@@ -357,6 +359,8 @@ class S2Image(S2ImageMeta):
 
     def __init__(self, ds=None, safe_path=None):
         super().__init__(path=safe_path)
+
+        self.is_meta = False
 
         self.band_names = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07',
                            'B08', 'B09', 'B10', 'B11', 'B12', 'B8A']
