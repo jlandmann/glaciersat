@@ -34,6 +34,7 @@ class SatelliteImageMeta:
         self.cloud_mask = None
         self.cloud_area_percent = None
         self.proc_level = None
+        self.date = None
 
     def __repr__(self):
 
