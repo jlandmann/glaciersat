@@ -5,15 +5,19 @@ sphinx:
    configuration: docs/conf.py
 
 build:
-    image: latest
+  os: ubuntu-20.04
+  tools:
+    python: mambaforge-4.10
 
 conda:
     environment: ci/requirements-py39-all.yml
 
-python:
-    version: 3.8
-    install:
-      - method: setuptools
-        path: .
+sphinx:
+  fail_on_warning: false
 
+python:
+  # Install our python package before building the docs
+  install:
+    - method: pip
+      path: .
 formats: []
