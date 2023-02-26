@@ -32,7 +32,8 @@ jobs:
       - name: Install deps
         run: |
              poetry update python=${{ matrix.python-version }}
-             poetry install --with dev
+             poetry install --with=dev
+             poetry shell
       - name: Test
         run: |
           coverage erase
