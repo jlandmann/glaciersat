@@ -121,7 +121,9 @@ req_packages = ['numpy',
                 'netcdf4',
                 'xarray>=0.16',
                 'sentinelsat',
-                'salem'
+                'salem',
+                'dask',
+                'geopandas'
                 ]
 
 
