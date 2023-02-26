@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "3.10.7"
+python = ">=3.8,<3.11"
 sentinelsat = "^1.1.1"
 xarray = "*"
 joblib = "^1.2.0"
