@@ -7,7 +7,7 @@ import salem
 import numpy as np
 import geopandas as gpd
 from glaciersat.core import albedo
-from glaciersat import utils
+from glaciersat import utils, cfg
 
 import logging
 
@@ -725,12 +725,25 @@ class S2Image(S2ImageMeta):
         return ndsi(self.data.bands.sel(band='B03'),
                     self.data.bands.sel(band='B08'))
 
-class LandsatImage(SatelliteImage):
-    def __init__(self):
-        super().__init__()
+
+class LandsatImage(LandsatImageMeta):
+    """
+    Interface to Landsat satellite imagery.
+    """
+    def __init__(self, ds=None, path=None):
+        super().__init__(path=path)
+
+        self.is_meta = False
+
+        self.band_names = []
+        self.band_names_short = []
+        self.band_names_long = []
 
     def from_download_file(self, download_path):
-        pass
+        raise NotImplementedError
+
+    def get_scene_footprint(self, fp_path):
+        raise NotImplementedError
 
 
 def ndvi(nir: Union[xr.DataArray, np.ndarray, float, int],
@@ -1347,3 +1360,80 @@ def create_cloud_shadow_mask(cloud_mask: np.ndarray,
     shadow_mask_final = shadow_mask_declut * dark_pixels
 
     return shadow_mask_final
+
+
+def get_cloud_and_shadow_mask(image, alpha_ens=None, which=None,
+                              cloud_heights=None, erode_n_pixels=None,
+                              dilate_n_pixels=None, ir_sum_thresh=None):
+    """
+
+    Parameters
+    ----------
+    image :
+        The Sentinel satellite image (with `bands` variable) to work on. Must
+        be reflectances, i.e. data value range 0-1.
+    alpha_ens :
+    which :
+    cloud_heights :
+    erode_n_pixels :
+    dilate_n_pixels :
+    ir_sum_thresh :
+
+    Returns
+    -------
+
+    """
+
+    csmask_list = []
+    for i, t in enumerate(image.time.values):
+        cmask = image.sel(time=t).cmask
+        if which == 'geeguide':
+            cmask_comb = geeguide_cloud_mask(image.sel(time=t).bands)
+        else:
+            raise NotImplementedError('Cloud mask algorithm "{}" not yet '
+                                      'covered.'.format(which))
+        cmask_comb = np.clip(cmask_comb + cmask, 0., 1.)
+        shadows = create_cloud_shadow_mask(
+            cmask_comb, image.sel(time=t).bands,
+            image.sel(time=t).solar_azimuth_angle.item(),
+            image.sel(time=t).solar_zenith_angle.item(),
+            cloud_heights=cloud_heights, erode_n_pixels=erode_n_pixels,
+            dilate_n_pixels=dilate_n_pixels, ir_sum_thresh=ir_sum_thresh)
+        csmask = np.clip(cmask_comb + shadows, 0., 1.)
+
+        # declutter the cloud mask (there are single pixel commission errors)
+        # todo: are the values for erosion and dilation ok to take?
+        csmask = utils.declutter(csmask, n_erode=cfg.PARAMS['erode_n_pixels'],
+                                 n_dilate=cfg.PARAMS['dilate_n_pixels'])
+
+        csmask_list.append(csmask)
+
+        csmask_ds = cmask.salem.grid.to_dataset()
+        csmask_ds.expand_dims(dim='time')
+        csmask_ds = csmask_ds.assign_coords(time=(['time'], image.time.values))
+        csmask_ds['cmask'] = (['time', 'y', 'x'], csmask)
+
+
+def better_clouds_on_snow_mask(ndsi, thresh=0.5):
+    """
+    Better clouds on snow mask based on  NDSI thresholds -0.1 to 0.2 in [1]_.
+
+    Parameters
+    ----------
+    ndsi :
+    thresh :
+        cloud probability threshold
+
+    Returns
+    -------
+
+    References
+    ----------
+    .. [1]: https://bit.ly/3liwsNv
+    """
+
+    cloud_prob = (ndsi + 0.1) / 0.3
+    cloud_prob[cloud_prob >= thresh] = 1.
+    cloud_prob[cloud_prob < thresh] = 0.
+
+    return cloud_prob
