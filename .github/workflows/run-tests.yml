@@ -33,7 +33,7 @@ jobs:
         run: |
              poetry update python=${{ matrix.python-version }}
              poetry install --with=dev
-             poetry shell
+             source $(poetry env info --path)/bin/activate
       - name: Test
         run: |
           coverage erase
