@@ -36,11 +36,11 @@ jobs:
              source $(poetry env info --path)/bin/activate
       - name: Test
         run: |
-          coverage erase
-          coverage run --source=./glaciersat --parallel-mode --module pytest --verbose glaciersat
-          coverage combine
-          coverage xml
-          coverage report --skip-covered
+          poetry run coverage erase
+          poetry run coverage run --source=./glaciersat --parallel-mode --module pytest --verbose glaciersat
+          poetry run coverage combine
+          poetry run coverage xml
+          poetry run coverage report --skip-covered
         env:
           MPLBACKEND: agg
           COVERAGE_RCFILE: ${{ github.workspace }}/.coveragerc
@@ -49,7 +49,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COVERALLS_SERVICE_NAME: github
           COVERALLS_PARALLEL: true
-        run: coveralls
+        run: poetry run coveralls
   finish-coveralls:
     name: Coveralls Finished
     needs: test
