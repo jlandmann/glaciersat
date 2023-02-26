@@ -176,7 +176,8 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
 
     # todo: is it possible to make this a probabilistic snow map?
     try:
-        nir = ds.bands.sel(band=nir_bandname).values / 10000.
+        # todo: check if really a value 0-1 is needed, or if it doesn't matter
+        nir = ds.bands.sel(band=nir_bandname).values
     except KeyError:  # no sat image at dates
         log.error('NIR channel not available.')
         return None
@@ -186,6 +187,7 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
         # cmask already masked to glacier ROI
         cloud_cov_ratio = np.nansum(ds.cmask.values) / np.sum(
             ~np.isnan(ds.cmask.values))
+        print('CLOUDCOV_RATIO: ', cloud_cov_ratio)
         cprob_thresh = cfg.PARAMS['cloud_prob_thresh']
         cmask[cmask > cprob_thresh] = np.nan
         cmask[cmask <= cprob_thresh] = 1.
@@ -202,8 +204,8 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
     n_valid_pix = np.sum(~np.isnan(nir))
 
     # if too much cloud cover, don't analyze at all
-    if (cloud_cov_ratio > cfg.PARAMS['max_cloud_cover_ratio']) or \
-            (n_valid_pix == 0.):
+    if (cloud_cov_ratio > cfg.PARAMS['max_cloud_cover_ratio']) or (
+            n_valid_pix == 0.):
         log.error('Masked pixel ratio {:.2f} is higher than the chosen '
                   'threshold max_cloud_cover_ratio or glacier contains only '
                   'NaN.'.format(cloud_cov_ratio))
@@ -214,8 +216,8 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
         snow = snow * 1.
         snow[np.isnan(nir)] = np.nan
 
-    snow_da = xr.DataArray(data=snow, coords={'y': ds.coords['y'],
-                                              'x': ds.coords['x']},
+    snow_da = xr.DataArray(data=snow,
+                           coords={'y': ds.coords['y'], 'x': ds.coords['x']},
                            dims=['y', 'x'])
 
     if date is not None:
@@ -228,12 +230,135 @@ def map_snow_asmag(ds: xr.Dataset, date: pd.Timestamp or None = None,
     return snow_da
 
 
+def get_snow_line_altitude_asmag(ds, date, dem, bin_height=20., n_bins=5):
+    """
+    Get snow line using the ASMAG method from Rastner et al. (2019) [1]_.
+
+    The method evaluates a blue band histogram and separates it into two
+    parts using the Otsu threshold described in [2]_.
+
+    Parameters
+    ----------
+    ds: xr.Dataset
+        Dataset containing a satellite image. It should be given as
+        reflectances, i.e. ranging from zero to one.
+        todo: Needs a NIR channel named 'B08' at the moment.
+    date: pd.Timestamp
+        Date for which to process the snow line.
+    dem: xr.Dataset
+        An elevation error_func to base the snow line search on.
+    bin_height: float
+        Height of one elevation bin used to look for the snow line altitude
+        (m). Default: 20.
+    n_bins: int
+        Number of bins used to analyze where the snow line altitude is.
+        Default: 5.
+
+    Returns
+    -------
+
+
+    References
+    ----------
+    .. [1] Rastner, P.; Prinz, R.; Notarnicola, C.; Nicholson, L.; Sailer, R.;
+        Schwaizer, G. & Paul, F.: On the Automated Mapping of Snow Cover on
+        Glaciers and Calculation of Snow Line Altitudes from Multi-Temporal
+        Landsat Data. Remote Sensing, Multidisciplinary Digital Publishing
+        Institute, 2019, 11, 1410.
+    .. [2] Otsu, N.: A threshold selection method from gray-level
+        histograms. IEEE transactions on systems, man, and cybernetics, IEEE,
+        1979, 9, 62-66.
+    """
+
+    # 1) map the snow, if not yet present
+    snowmap = map_snow_asmag(ds, date)
+
+    # 2) derive the snow line
+
+    try:
+        # Get DEM values
+        elevation_grid = dem.height.values
+        # Convert DEM to 20 Meter elevation bands:
+        cover = []
+        for num, height in enumerate(
+                np.arange(int(elevation_grid[elevation_grid > 0].min()),
+                          int(elevation_grid.max()), bin_height)):
+            if num > 0:
+                # starting at second iteration:
+                while snowmap.shape != elevation_grid.shape:
+                    if elevation_grid.shape[0] > snowmap.shape[0] or \
+                            elevation_grid.shape[1] > snowmap.shape[
+                        1]:  # Shorten elevation grid
+                        elevation_grid = elevation_grid[0:snowmap.shape[0],
+                                         0:snowmap.shape[1]]
+                    if elevation_grid.shape[0] < snowmap.shape[
+                        0]:  # Extend elevation grid: append row:
+                        try:
+                            elevation_grid = np.append(elevation_grid, [
+                                elevation_grid[
+                                (elevation_grid.shape[0] - snowmap.shape[0]),
+                                :]], axis=0)
+                        except IndexError:
+                            raise  # BUG: very exeptionally, the snow_map is broken -->  # log.error('Snow map is broken - BUG!')  # return
+                    if elevation_grid.shape[1] < snowmap.shape[
+                        1]:  # append column
+                        b = elevation_grid[:,
+                            (elevation_grid.shape[1] - snowmap.shape[1]):
+                            elevation_grid.shape[1]]
+                        elevation_grid = np.hstack((elevation_grid,
+                                                    b))  # Expand grid on boundaries to obtain raster in same shape after
+
+                # find all pixels with same elevation between "height" and "height-20":
+                while band_height > 0:
+                    try:
+                        snow_band = snowmap[
+                            (elevation_grid > (height - band_height)) & (
+                                    elevation_grid < height)]
+                    except IndexError:
+                        log.error(' Index Error:', elevation_grid.shape,
+                                  snowmap.shape)
+                    if snow_band.size == 0:
+                        band_height -= 1
+                    else:
+                        break
+                # Snow cover on 20 m elevation band:
+                if snow_band.size == 0:
+                    cover.append(0)
+                else:
+                    cover.append(
+                        snow_band[snow_band == 1].size / snow_band.size)
+
+        num = 0
+        if any(loc_cover > 0.5 for loc_cover in cover):
+            while num < len(cover):
+                # check if there are 5 continuous bands with snow cover > 50%
+                if all(bins > 0.5 for bins in cover[num:(num + bands)]):
+                    # select lowest band as SLA
+                    sla = range(int(elevation_grid[elevation_grid > 0].min()),
+                                int(elevation_grid.max()), 20)[num]
+                    break  # stop loop
+                if num == (len(cover) - bands - 1):
+                    # if end of glacier is reached and no SLA found:
+                    bands = bands - 1
+                    # start search again
+                    num = -1
+                if len(cover) <= bands:
+                    bands = bands - 1
+                    num = -1
+                num += 1
+        else:
+            sla = elevation_grid.max()
+        dem_ts.close()
+        return sla
+    except:
+        return
+
+
 def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
                      date: pd.Timestamp or None = None,
                      roi_shp: str or gpd.GeoDataFrame or None = None,
                      alternate: bool = False, r_crit: float or None = None,
-                     optimize_r_crit: bool = False) -> \
-        xr.DataArray:
+                     optimize_r_crit: bool = False) -> xr.DataArray:
     """
     Map snow using the algorithm described in Naegeli et al. (2019) [1]_.
 
@@ -299,14 +424,20 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
         dem = dem.salem.roi(shape=roi_shp)
 
     if date is not None:
-        dem = dem.sel(time=date, method="nearest").height.values
+        try:
+            dem = dem.sel(time=date, method="nearest").height.values
+        except ValueError:
+            dem = dem.height.values
         try:
             ds = ds.sel(time=date)
         except ValueError:  # dimension not present
             pass
     else:
         # take the latest DEM
-        dem = dem.isel(time=-1).height.values
+        try:
+            dem = dem.isel(time=-1).height.values
+        except ValueError:
+            dem = dem.height.values
 
         if ('time' in ds.coords) and (len(ds.coords['time']) == 1):
             ds = ds.isel(time=0)
@@ -325,6 +456,7 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
         # cmask already masked to glacier ROI
         cloud_cov_ratio = np.nansum(ds.cmask.values) / np.sum(
             ~np.isnan(ds.cmask.values))
+        print('CLOUDCOV_RATIO: ', cloud_cov_ratio)
         cprob_thresh = cfg.PARAMS['cloud_prob_thresh']
         cmask[cmask > cprob_thresh] = np.nan
         cmask[cmask <= cprob_thresh] = 1.
@@ -381,22 +513,21 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
                 np.abs([sla - np.nanmin(dem), np.nanmax(dem) - sla]))
 
             min_ampl = 0.1  # still arbitrary
-            max_ampl = cfg.PARAMS['naegeli_snow_alpha_thresh'] - \
-                       cfg.PARAMS['naegeli_ice_alpha_thresh']
+            max_ampl = cfg.PARAMS['naegeli_snow_alpha_thresh'] - cfg.PARAMS[
+                'naegeli_ice_alpha_thresh']
             min_icpt = cfg.PARAMS['naegeli_ice_alpha_thresh']
             max_icpt = cfg.PARAMS['naegeli_snow_alpha_thresh']
 
             # stupid, but true: this is double work we wanted to avoid
             merged = xr.merge([albedo_amb, dem_amb])
             bw = cfg.PARAMS['bin_width']
-            aab = merged.groupby_bins('height',
-                                      np.arange(np.nanmin(dem_amb),
-                                                np.nanmax(dem_amb),
-                                                bw)).mean(skipna=True)
+            aab = merged.groupby_bins('height', np.arange(np.nanmin(dem_amb),
+                                                          np.nanmax(dem_amb),
+                                                          bw)).mean(
+                skipna=True)
 
             # interpolate NaNs linearly (can happen with detached ambig. areas)
-            aab = aab.interpolate_na(
-                dim='height_bins', use_coordinate=False,
+            aab = aab.interpolate_na(dim='height_bins', use_coordinate=False,
                 fill_value='extrapolate', method='slinear')
 
             # edge interpolation issues
@@ -405,9 +536,9 @@ def map_snow_naegeli(ds: xr.Dataset, dem: str or xr.Dataset,
 
             alpha_in = aab.alpha.values
             height_in = aab.height.values
-            r_squared = get_model_fit_r_squared(
-                _root_sum_squared_residuals, _step_function, height_in,
-                alpha_in, bounds=([min_ampl, min_icpt], [max_ampl, max_icpt]),
+            r_squared = get_model_fit_r_squared(_root_sum_squared_residuals,
+                _step_function, height_in, alpha_in,
+                bounds=([min_ampl, min_icpt], [max_ampl, max_icpt]),
                 x0=np.array([np.clip(np.nanmax(alpha_in) - np.nanmin(alpha_in),
                                      min_ampl, max_ampl),
                              np.clip(np.nanmin(alpha_in), min_icpt,
@@ -447,8 +578,8 @@ map_snow_naegeli_alternate = partial(map_snow_naegeli, alternate=True,
                                      optimize_r_crit=True, r_crit=None)
 
 
-def primary_surface_type_evaluation(alpha_ds: xr.DataArray or xr.Dataset) -> \
-        xr.DataArray or xr.Dataset:
+def primary_surface_type_evaluation(
+        alpha_ds: xr.DataArray or xr.Dataset) -> xr.DataArray or xr.Dataset:
     """
     Do a primary surface type evaluation after Naegeli et al. (2019) [1]_.
 
@@ -481,8 +612,8 @@ def primary_surface_type_evaluation(alpha_ds: xr.DataArray or xr.Dataset) -> \
     # ice
     alpha_ds = alpha_ds.where((alpha_ds >= iat) | np.isnan(alpha_ds), 0.)
     # ambiguous
-    alpha_ds = alpha_ds.where((alpha_ds < iat) | (alpha_ds > sat) |
-                              np.isnan(alpha_ds), 0.5)
+    alpha_ds = alpha_ds.where(
+        (alpha_ds < iat) | (alpha_ds > sat) | np.isnan(alpha_ds), 0.5)
 
     return alpha_ds
 
@@ -608,7 +739,6 @@ def _find_max_albedo_slope_stepfit(alpha_amb: xr.Dataset, dem_amb: xr.Dataset,
     sla = np.mean([dem_min, dem_max])
     alpha_crit = None
     for i in range(1, n_iterations + 1):
-
         # 1) bin according to iteration number
         alpha_amb_binned = merged.groupby_bins('height', 2 ** i + 1).mean()
 
@@ -621,12 +751,16 @@ def _find_max_albedo_slope_stepfit(alpha_amb: xr.Dataset, dem_amb: xr.Dataset,
         search_range = np.unique(
             np.clip(np.arange(search_ix - 2, search_ix + 3), 0,
                     len(alpha_slope.height_bins) - 1))
-        argmax_ix = alpha_slope.isel(
-            height_bins=search_range).alpha.argmax().item()
+        try:
+            argmax_ix = alpha_slope.isel(
+                height_bins=search_range).alpha.argmax().item()
+        except ValueError:  # all NaN slice encountered
+            continue
         sla = alpha_slope.isel(height_bins=search_range).height.values[
             argmax_ix]
-        alpha_crit = alpha_amb_binned.isel(
-            height_bins=search_range).alpha.values[argmax_ix]
+        alpha_crit = \
+            alpha_amb_binned.isel(height_bins=search_range).alpha.values[
+                argmax_ix]
 
     return alpha_crit, sla
 
@@ -809,7 +943,7 @@ def generate_endmembers_from_otsu(
     # we are strict: if no cloud mask available, the script will fail
     if cloudmask is None:
         if 'cmask' in ds.variables:
-            cloudmask = ds.cmask
+            cloudmask = ds.copy(deep=True)
         else:
             raise ValueError('Cloud mask must be supplied either with the '
                              'imagery or as separate argument (to prevent '
@@ -840,6 +974,8 @@ def generate_endmembers_from_otsu(
             current_band = image.sel(time=t, band=b).values
             current_band_masked = current_band[
                 ~np.isnan(current_band) & (cm_roi == 0.)]
+            if np.isnan(current_band_masked).all():
+                continue
             current_band_clouds = current_band[
                 ~np.isnan(current_band) & (cm_roi != 0.)]
             o_now = filters.threshold_otsu(current_band_masked)
@@ -854,9 +990,381 @@ def generate_endmembers_from_otsu(
                 ref_snow[j, it] = median_reflect_snow
             ref_cloud[j, it] = np.nanmedian(current_band_clouds)
 
+    ref_snow = np.nanmedian(ref_snow, axis=1)
+    ref_ice = np.nanmedian(ref_ice, axis=1)
+    ref_cloud = np.nanmedian(ref_cloud, axis=1)
     endmembers = xr.Dataset({'snow': (['band'], ref_snow),
                              'ice': (['band'], ref_ice),
                              'clouds': (['band'], ref_cloud)},
                             coords={'band': ds.band.values})
     return endmembers
 
+
+if __name__ == '__main__':
+    import matplotlib.pyplot as plt
+    import salem
+    from matplotlib import colors, cm
+    import warnings
+    from glaciersat.core import albedo
+
+    cfg.initialize()
+    cloud_thresh = cfg.PARAMS['max_cloud_cover_ratio']
+
+    glacier_id = 'RGI50-11.B5616n-1'
+
+    #short_name = 'fin'
+    shp_path = 'c:\\users\\johannes\\documents\\modelruns\\CH\\per_glacier\\RGI50-11\\{}\\{}\\outlines.shp'.format(glacier_id[:11], glacier_id)
+    dem_path = 'c:\\users\\johannes\\documents\\modelruns\\CH\\per_glacier\\RGI50-11\\{}\\{}\\dem.tif'.format(glacier_id[:11], glacier_id)
+
+    ds = xr.open_dataset(
+        #'c:\\users\\johannes\\desktop\\{}_latest.nc'.format(
+        #    short_name))
+        #'c:\\users\\johannes\\documents\\modelruns\\CH\\per_glacier\\RGI50-11\\{}\\{}\\sat_images.nc'.format(glacier_id[:11], glacier_id))
+        'c:\\users\\johannes\\desktop\\fin_latest.nc')
+    # convert to reflectance
+    ds['bands'] = ds['bands'] / 10000.
+    # ds = ds.sel(time='2020-09-11')
+    # ds = ds.sel(time='2015-08-29')
+    ol = salem.read_shapefile(shp_path)
+    ds.attrs['pyproj_srs'] = ol.crs.to_proj4()
+    # ds = ds.salem.roi(shape=ol)
+    result = []
+    if 'albedo' not in ds.data_vars:
+        alpha_ens = albedo.get_ensemble_albedo(ds.bands.sel(band='B02'),
+                                               ds.bands.sel(band='B03'),
+                                               ds.bands.sel(band='B04'),
+                                               ds.bands.sel(band='B08'),
+                                               ds.bands.sel(band='B11'),
+                                               ds.bands.sel(band='B12')).albedo
+        alpha_ens.attrs['pyproj_srs'] = ol.crs.to_proj4()
+    else:
+        alpha_ens = ds.albedo
+
+    # order: 1,2,3,4,5,6,7,8,9,10,11,12,8A
+    # 1,2,3,4,5,6,7,8,9,11,12 (from Naegeli), 8A, 10 (read from Naegeli)
+
+    # original: snow, bright ice, dark ice
+    # endmembers = np.array([
+    #    [0.59, 0.63, 0.67, 0.67, 0.665, 0.66, 0.63, 0.6, 0.5, 0.105, 0.04,
+    #     0.04, 0.52],
+    #    [0.59, 0.575, 0.55, 0.50, 0.48, 0.46, 0.415, 0.385, 0.29, 0.05, 0.01,
+    #     0.01, 0.37],
+    #    [0.12, 0.125, 0.135, 0.13, 0.125, 0.12, 0.115, 0.115, 0.085, 0.02,
+    #     0.01, 0.01, 0.095]])
+
+    # merged bright and dark ice
+    endmembers = np.array([
+        [0.59, 0.63, 0.67, 0.67, 0.665, 0.66, 0.63, 0.6, 0.5, 0.105, 0.04,
+         0.04, 0.52], np.mean(np.array([[0.59, 0.575, 0.55, 0.50, 0.48,
+                                         0.46, 0.415, 0.385, 0.29, 0.05,
+                                         0.01, 0.01, 0.37],
+                                        [0.12, 0.125, 0.135, 0.13, 0.125,
+                                         0.12, 0.115, 0.115, 0.085, 0.02,
+                                         0.01, 0.01, 0.095]]), axis=0)])
+
+    # B10 comes from L1C reflectance (no B10 in L2A)
+    endmembers_clouds = np.array(
+        [0.7657637, 0.81688046, 0.8546996, 0.8671256, 0.8793237, 0.8388719,
+         0.80377203, 0.7660221, 0.72458196, 0.14, 0.07805042, 0.07285204,
+         0.7467731])
+
+    # from otsu thresholding -B10 is interpolated
+    # endmembers = np.array([[0.69586787, 0.71507332, 0.7363538, 0.74294336, 0.75170626,
+    #        0.7546415, 0.74678447, 0.7399502, 0.74465635, 0.658109815, 0.57156328,
+    #        0.56447413, 0.73288224],
+    #       [0.19586787, 0.21507332, 0.2363538, 0.24294336, 0.25170626,
+    #        0.2546415, 0.24678447, 0.2399502, 0.24465635, 0.158109815, 0.07156328,
+    #        0.06447413, 0.23288224]])
+    # from otsu thresholding (only JUN-SEP images) -B10 is interpolated
+    # np.array([[0.7096425, 0.72321552, 0.74200752, 0.7473668, 0.75990546,
+    #        0.75867552, 0.74852863, 0.74274942, 0.74880117, 0.66, 0.58137598,
+    #        0.57796797, 0.7350045],
+    #          [0.2096425, 0.22321552, 0.24200752, 0.2473668, 0.25990546,
+    #        0.25867552, 0.24852863, 0.24274942, 0.24880117, 0.16, 0.08137598,
+    #        0.07796797, 0.2350045]
+    #       ])
+    # endmembers = np.vstack([endmembers, endmembers_clouds])
+
+    # from Otsu on Rhone  -  B10 is guessed
+    # endmembers = np.array([[0.4965, 0.56609999, 0.59500002, 0.63259999, 0.64159998, 0.61344996,
+    #        0.5839, 0.58600002, 0.52585005, 0.31, 0.28259999, 0.28934999,
+    #        0.55070002],
+    #       [0.2157, 0.2335, 0.25400001, 0.2469, 0.25350002, 0.24230001,
+    #        0.22669999, 0.21745, 0.2137, 0.0218, 0.03, 0.0212, 0.21029999]#,
+    #       #[0.26780001, 0.2793, 0.29859999, 0.29440002, 0.31029998, 0.29585,
+    #       # 0.27875001, 0.2652, 0.30360001, 0.14, 0.09220001, 0.09269999, 0.26525]
+    #                       ])
+
+    # from Otsu on FIN  -  B10 is guessed
+    # endmembers = xr.Dataset({['snow', 'ice']: np.array([[0.71704999, 0.78114998, 0.82624999, 0.838, 0.84514999,
+    #   0.79190001, 0.74450001, 0.71200001, 0.70695001, 0.2, 0.15085,
+    #   0.13025001, 0.6832],
+    #                       [0.33805001, 0.3188, 0.32625, 0.3241, 0.34154999,
+    #                        0.321825, 0.30427499, 0.27855, 0.3328, 0.05, 0.01725,
+    #                        0.017, 0.27707499]])})
+    endmembers = xr.Dataset({'snow': (['band'], np.array(
+        [0.71704999, 0.78114998, 0.82624999, 0.838, 0.84514999, 0.79190001,
+         0.74450001, 0.71200001, 0.70695001, 0.2, 0.15085, 0.13025001,
+         0.6832])), 'ice': (['band'], np.array(
+        [0.33805001, 0.3188, 0.32625, 0.3241, 0.34154999, 0.321825, 0.30427499,
+         0.27855, 0.3328, 0.05, 0.01725, 0.017, 0.27707499]))}, coords={
+        'band': ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B09',
+                 'B10', 'B11', 'B12', 'B8A']})
+
+    #if glacier_id == 'RGI50-11.A51D10':
+    #    log.warning('ENDMEMBERS ARE FIXED FOR HÜFIFIRN')
+    #    endmembers = xr.Dataset({'snow': (['band'], np.array(
+    #        [0.63139999, 0.67644998, 0.73084998, 0.75749999, 0.78525001,
+    #   0.74195001, 0.69260001, 0.67124999, 0.63692501, 0.158     ,
+    #   0.13635001, 0.6464    ])), 'ice': (['band'], np.array(
+    #        [0.36544999, 0.33662501, 0.357125  , 0.361     , 0.39434999,
+    #   0.3734    , 0.34899999, 0.31655   , 0.34459999, 0.01685   ,
+    #   0.015     , 0.3223    ]))},
+    #                            coords={
+    #                                'band': ['B01', 'B02', 'B03', 'B04', 'B05',
+    #                                         'B06', 'B07', 'B08', 'B09', 'B10',
+    #                                         'B11', 'B12', 'B8A']})
+
+    endmembers = generate_endmembers_from_otsu(ds, ol)
+
+    '''
+    # based on samples form Findelen
+    sshad = ds.bands.values[:, 170:182, 264:278]
+    ssun = ds.bands.values[:, 112:124, 277:295]
+    isun = ds.bands.values[:, 75:100, 140:165]
+
+    endmembers = np.vstack(
+        [np.mean([np.mean(sshad.reshape(13, sshad.shape[1]*sshad.shape[2]), axis=1),
+        np.mean(ssun.reshape(13, ssun.shape[1]*ssun.shape[2]), axis=1)], axis=0),
+        np.mean(isun.reshape(13, isun.shape[1]*isun.shape[2]), axis=1)])
+    '''
+    ds['albedo'] = alpha_ens
+    dem = xr.open_rasterio(dem_path)
+    dem.attrs['pyproj_srs'] = dem.attrs['crs']
+    dem = ds.salem.transform(dem.to_dataset(name='height'))
+    dem_roi = dem.salem.roi(shape=ol)
+    dem = dem.isel(band=0)
+
+    """
+    date = pd.Timestamp('2020-08-07')
+    cmask = ds.sel(time=date).cmask
+    cmask_comb = imagery.geeguide_cloud_mask(ds.sel(time=date).bands)
+    cmask_comb = np.clip(cmask_comb + cmask, 0., 1.)
+    shadows = imagery.create_cloud_shadow_mask(cmask_comb,
+                                               ds.sel(time=date).bands, ds.sel(
+            time=date).solar_azimuth_angle.mean(skipna=True).item(), ds.sel(
+            time=date).solar_zenith_angle.mean(skipna=True).item())
+    csmask = np.clip(cmask_comb + shadows, 0., 1.)
+    csmask_ds = cmask.salem.grid.to_dataset()
+    csmask_ds['cmask'] = (['y', 'x'], csmask)
+    cm_roi = csmask_ds.salem.roi(shape=ol).cmask.values
+    um = map_snow_linear_unmixing(ds.sel(time=date), roi_shp=ol,
+                             endmembers=endmembers, cloud_mask=cm_roi)
+    asm = map_snow_asmag(ds, date=date, roi_shp=ol)
+    naeg = map_snow_naegeli(ds, date=date, dem=dem, roi_shp=ol)
+    naeg_alt = map_snow_naegeli_alternate(ds, date=date, dem=dem, roi_shp=ol)
+    """
+    # important! For neaegli method, ds needs to have attribute 'albedo'
+    ds['albedo'] = alpha_ens
+    for date in ds.time.values:
+        if pd.Timestamp(date) != pd.Timestamp('2020-06-29'):
+            continue
+        cmask = ds.sel(time=date).cmask
+        cmask_comb = imagery.geeguide_cloud_mask(ds.sel(time=date).bands)
+        cmask_comb = np.clip(cmask_comb + cmask, 0., 1.)
+        shadows = imagery.create_cloud_shadow_mask(cmask_comb,
+                                           ds.sel(time=date).bands,
+                                           ds.sel(
+                                               time=date).solar_azimuth_angle.mean(
+                                               skipna=True).item(), ds.sel(
+                time=date).solar_zenith_angle.mean(skipna=True).item())
+        csmask = np.clip(cmask_comb + shadows, 0., 1.)
+        csmask_ds = cmask.salem.grid.to_dataset()
+        csmask_ds['cmask'] = (['y', 'x'], csmask)
+        cm_roi = csmask_ds.salem.roi(shape=ol).cmask.values
+        res = map_snow_linear_unmixing(ds.sel(time=date), roi_shp=ol, endmembers=endmembers, cloud_mask=cm_roi)
+        asm = map_snow_asmag(ds, date=date, roi_shp=ol)
+        naeg = map_snow_naegeli(ds, date=date, dem=dem, roi_shp=ol)
+        naeg_alt = map_snow_naegeli_alternate(ds, date=date, dem=dem,
+                                           roi_shp=ol)
+        #res['snow_asmag'] = asm
+        #res['snow_naegeli'] = naeg
+        #res['snow_naegeli_alt'] = naeg_alt
+        #res['cmask'] = csmask
+
+        data = xr.merge([res,
+                         asm.to_dataset(name='snow_asmag'),
+                         naeg.to_dataset(name='snow_naeg'),
+                         naeg_alt.to_dataset(name='snow_naeg_alt')])
+        data['cmask'] = csmask
+        result.append(data)
+
+    dem = xr.open_rasterio(dem_path)
+    dem.attrs['pyproj_srs'] = dem.attrs['crs']
+    dem = ds.salem.transform(dem.to_dataset(name='height'))
+    dem_roi = dem.salem.roi(shape=ol)
+    dem = dem.isel(band=0)
+
+    # plot snow probability = 50% distribution over elevation
+    # time_ix = np.where(ds.time ==pd.Timestamp('2020-09-11'))[0][0]
+    # dem['snowprob'] = (('y', 'x'), result[time_ix]['snow'])
+    # sl = xr.where((0.48 < dem.snowprob) & (dem.snowprob < 0.52), 1, 0)
+    # sl.groupby_bins(dem.height,
+    #                bins=np.arange(np.nanmin(dem_roi.height.values),
+    #                               np.nanmax(dem_roi.height.values),
+    #                               10)).sum().plot()
+
+    # plot overall snow probability over elevation
+
+    warnings.filterwarnings('ignore')
+
+
+    def median_with_nan_threshold(g, max_nan_ratio=0.1):
+        valid_ratio = (g.count().iceprob / g.count().height)
+        if valid_ratio < (1 - max_nan_ratio):
+            g['iceprob'] = g.iceprob.where(pd.isnull(g.iceprob), np.nan)
+            g['snowprob'] = g.snowprob.where(pd.isnull(g.snowprob), np.nan)
+        return g.median(skipna=True)
+
+
+    def std_with_nan_threshold(g, max_nan_ratio=0.1):
+        if (g.count().iceprob / g.count().height) < (1 - max_nan_ratio):
+            g['iceprob'] = g.iceprob.where(pd.isnull(g.iceprob), np.nan)
+            g['snowprob'] = g.snowprob.where(pd.isnull(g.snowprob), np.nan)
+        return g.std(skipna=True)
+
+    """
+    fig, ax = plt.subplots()
+    cmap = plt.get_cmap('hsv', 366)
+    fontsize = 16
+    plt.rcParams.update({'font.size': fontsize})
+    n_processed = 0
+    for i, t in enumerate(ds.time.values):
+        cmask = ds.sel(time=t).cmask
+        cmask_comb = imagery.geeguide_cloud_mask(ds.sel(time=t).bands)
+        cmask_comb = np.clip(cmask_comb + cmask, 0., 1.)
+        shadows = imagery.create_cloud_shadow_mask(cmask_comb, ds.sel(time=t).bands,
+                                           ds.sel
+                                               (time=t).solar_azimuth_angle.mean(
+                                      skipna=True).item(),
+                                           ds.sel
+                (time=t).solar_zenith_angle.mean(
+                                      skipna=True).item())
+        csmask = np.clip(cmask_comb + shadows, 0., 1.)
+        csmask_ds = cmask.salem.grid.to_dataset()
+        csmask_ds['cmask'] = (['y', 'x'], csmask)
+        cm_roi = csmask_ds.salem.roi(shape=ol).cmask.values
+        if np.nanmean(cm_roi) > cloud_thresh:
+            continue
+        n_processed += 1
+
+        time_ix = np.where(ds.time == t)[0][0]
+        print(t, time_ix)
+        #total_result = result[time_ix]
+        #total_result[:, cm_roi == 1.] = np.nan
+        total_result = result[time_ix].where(cm_roi == 0., np.nan)
+        #snow_result = total_result[0, ...]
+        #snow_result = total_result['snow'].values
+        # cheap, but works if all snow-related classes have "snow" in the name
+        snow_result = np.sum(np.atleast_3d(
+            [total_result[k].values for k in total_result.data_vars if 'snow' in k]),
+               axis=0)
+        # todo: think of non-hardcoding solution
+        # if total_result.shape[0] == 3:  # we have two ice classes
+        #    ice_result = total_result[1, ...] + total_result[2, ...]
+        # if total_result.shape[0] == 2:
+        #ice_result = total_result[1, ...]
+        #ice_result = total_result['ice'].values
+        ice_result = np.sum(np.atleast_3d(
+            [total_result[k].values for k in total_result.data_vars if 'ice' in k]),
+               axis=0)
+        # cloud_result = total_result[2, ...]
+        dem_roi['snowprob'] = (('y', 'x'), snow_result)
+        dem_roi['iceprob'] = (('y', 'x'), ice_result)
+        # dem_roi['cloudprob'] = (('y', 'x'), cloud_result)
+        bins = np.arange(np.nanmin(dem_roi.height.values),
+                         np.nanmax(dem_roi.height.values), 10)
+        dem_roi.groupby_bins(dem_roi.height, bins=bins).mean().snowprob.plot(
+            ax=ax, color=cmap(int(pd.Timestamp(t).dayofyear)))
+        gb = dem_roi.groupby_bins(dem_roi.height, bins=bins)
+
+        gb_median = gb.map(median_with_nan_threshold,
+                         max_nan_ratio=cloud_thresh)
+        gb_std = gb.map(std_with_nan_threshold,
+                        max_nan_ratio=cloud_thresh)
+
+        fig2, ax2 = plt.subplots(1, 2, figsize=(36, 18))
+        # xs = [np.mean([b.left, b.right]) for b, _ in list(gb)]
+        # ax2[0].violinplot([g.snowprob.values[~np.isnan(g.snowprob.values)] if (
+        #        (g.count().iceprob / g.count().height) > (
+        #            1 - cloud_thresh)) else list(
+        #    np.full_like(g.snowprob.values, np.nan)) for _, g in list(gb)],
+        #                  positions=xs, widths=80., showmedians=True)  # ,
+        # ax2[0].violinplot([g.iceprob.values[~np.isnan(g.snowprob.values)] if (
+        #        (g.count().iceprob / g.count().height) > (
+        #        1 - cloud_thresh)) else list(
+        #    np.full_like(g.iceprob.values, np.nan)) for _, g in list(gb)],
+        #                  positions=xs, widths=80., showmedians=True)  # ,
+        # color=cmap(int(pd.Timestamp(t).dayofyear)))#,
+        # yerr = gb_std.snowprob.values
+        xs = [np.mean([b.left, b.right]) for b in gb_median.height_bins.values]
+        ax2[0].errorbar(xs, gb_median.iceprob.values,
+                        color='b',  # cmap(int(pd.Timestamp(t).dayofyear)),
+                        yerr=gb_std.iceprob.values, fmt="+-", label='ice prob.', linewidth=2)
+        ax2[0].errorbar(xs, gb_median.snowprob.values,
+                        color='cyan',  # cmap(int(pd.Timestamp(t).dayofyear)),
+                        yerr=gb_std.snowprob.values, fmt="o-", label='snow prob.', linewidth=2)
+        # ax2[0].errorbar(xs, gb_median.cloudprob.values,
+        #                color=cmap(int(pd.Timestamp(t).dayofyear)),
+        #                yerr=gb_std.cloudprob.values, fmt="x-",
+        #                label='cloud prob.', linewidth=2)
+        ax2[0].set_xlim(np.min(bins), np.max(bins))
+        ax2[0].set_ylim(0., 1.)
+        ax2[0].legend(fontsize=fontsize)
+        ax2[0].set_title('Surface type probability',
+                         fontdict={'fontsize': fontsize})
+        ax2[0].set_xlabel('Elevation bins', fontdict={'fontsize': fontsize})
+        ax2[0].set_ylabel('Probability', fontdict={'fontsize': fontsize})
+        # alb = alpha_ens.sel(time=t).mean(dim='broadband').values
+        # alb[cm_roi == 1.] = np.nan
+        alb = alpha_ens.sel(time=t).mean(dim='broadband')
+        alb = alb.salem.roi(shape=ol)
+        grey_cmap = plt.get_cmap('Greys_r')
+        # grey_cmap.set_bad(color='blue', alpha=0.5)
+        # ax2[1].imshow(alb.values, cmap=grey_cmap, aspect='auto', vmin=0., vmax=1.)
+        alb.plot.imshow(ax=ax2[1], cmap=grey_cmap, vmin=0., vmax=1.)
+        csmask_to_plot = csmask_ds.salem.roi(shape=ol).cmask.where \
+            (csmask_ds.salem.roi(shape=ol).cmask == 1., np.nan)
+        csmask_to_plot.plot.imshow(ax=ax2[1], cmap='Blues', alpha=0.4)
+        # ax2[1].imshow(csmask_to_plot.values, cmap='Blues', alpha=0.4)
+        ax2[1].set_title('Broadband albedo (ensemble mean)',
+                         fontdict={'fontsize': fontsize})
+        ol.plot(ax=ax2[1], facecolor='none', edgecolor='chartreuse',
+                linewidth=3, aspect='equal')
+        fig2.suptitle(pd.Timestamp(t).strftime('%Y-%m-%d'),
+                      fontdict={'fontsize': fontsize})
+        fig2.colorbar(
+            cm.ScalarMappable(norm=colors.Normalize(vmin=0, vmax=366),
+                              cmap=cmap), ax=ax2[0], label='Day of Year')
+        fig2.savefig(
+            'c:\\users\\johannes\\documents\\publications\\Paper_Cameras_OptSatellite\\{}_profiles_otsu\\profile_{}.png'.format(
+                short_name, pd.Timestamp(t).strftime('%Y-%m-%d')))
+        plt.close(fig2)
+
+    fig.colorbar(
+        cm.ScalarMappable(norm=colors.Normalize(vmin=0, vmax=366), cmap=cmap),
+        ax=ax, label='Day of Year')
+    fig.savefig(
+        'c:\\users\\johannes\\documents\\publications\\Paper_Cameras_OptSatellite\\{}_profiles_otsu\\all_profiles_cloud_thresh_{}.png'.format(
+            short_name, cloud_thresh * 100))
+    plt.close(fig)
+    print('{} snow lines have been processed.'.format(n_processed))
+
+    # eliminate more unclassified clouds with the moisture index
+    plt.figure()
+    ds_mask = ds.bands.where(ds.cmask == 0)
+    test = ds.where(((ds_mask.isel(band=-1) - ds_mask.isel(band=10)) / (
+            ds_mask.isel(band=-1) + ds_mask.isel(band=10))).mean(
+        dim=['x', 'y'], skipna=True) > 0.8, drop=True)
+    (test.cmask.sum(dim=['x', 'y']) / test.cmask.count(dim='time')).plot()
+    """
