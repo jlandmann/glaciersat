@@ -78,7 +78,7 @@ def crop_sat_image_to_glacier(ds: xr.Dataset or imagery.SatelliteImage,
         ds = ds.data
 
     ds.load()
-
+    ds_glacier = None
     if not isinstance(ds, xr.Dataset):
         ds = ds.to_dataset(name='albedo', promote_attrs=True)
 
@@ -95,6 +95,19 @@ def crop_sat_image_to_glacier(ds: xr.Dataset or imagery.SatelliteImage,
         if pd.isnull(ds_glacier.to_array()).all():
             # todo: log something here?
             continue
+
+        # otherwise lost!!!
+        for v in ds_glacier.data_vars:
+            ds_glacier[v].encoding.update(ds[v].encoding)
+
+        ds_glacier['solar_azimuth_angle'] = (['time'], [ds.mean_azimuth_deg])
+        ds_glacier['solar_zenith_angle'] = (['time'], [ds.mean_zenith_deg])
+        ds_glacier.solar_azimuth_angle.attrs['unit'] = 'degree'
+        ds_glacier.solar_zenith_angle.attrs['unit'] = 'degree'
+        ds_glacier.solar_azimuth_angle.attrs['pyproj_srs'] = ds.attrs[
+            'pyproj_srs']
+        ds_glacier.solar_zenith_angle.attrs['pyproj_srs'] = ds.attrs[
+            'pyproj_srs']
 
         if gdir_candidates is not None:
             gi = gdir_candidates[i]
