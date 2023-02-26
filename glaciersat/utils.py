@@ -3,8 +3,10 @@ from sentinelsat import SentinelAPI
 from configobj import ConfigObj, ConfigObjError
 import zipfile
 import shapely
+from shapely.topology import TopologicalError
 import salem
 import pandas as pd
+import geopandas as gpd
 import os
 import glob
 import sys
@@ -226,8 +228,7 @@ def download_sentinel_tiles(
         platform: str = 'Sentinel-2', producttype: str = 'auto',
         cloudcov_min_pct: Optional[float] = None,
         cloudcov_max_pct: Optional[float] = None,
-        download_base_dir: Optional[str] = None) -> tuple[
-    OrderedDict, dict, dict, dict]:
+        download_base_dir: Optional[str] = None) -> tuple:
     """
     Download some Sentinel tiles as specified by tiles and a time span.
 
@@ -314,7 +315,8 @@ def download_sentinel_tiles(
 
     @retry(Exception, tries=100, delay=3600)
     def dl_all(*args, **kwargs):
-        log.info('Trying to download {} products...'.format(products))
+        log.info('Trying to download {} products...'.format(
+            [v['title'] for k, v in products.items()]))
         d, t, f = api.download_all(*args, **kwargs)
         log.info('{} downloaded, {} triggered, {} failed.'.format(
             len(d), len(t), len(f)))
@@ -335,6 +337,60 @@ def download_sentinel_tiles(
     return products, downloaded, triggered, failed
 
 
+def get_sentinel_products(date: pd.Timestamp, bbox: shapely.geometry.Polygon,
+                          platform: str = 'Sentinel-2',
+                          producttype: str = "S2MSI1C",
+                          cloudcov_min_pct: float or None = None,
+                          cloudcov_max_pct: float or None = None):
+    """
+    Function to set API for sentinel Copernicus hub with
+    credentials from the .snowicesat_credentials file
+    and get products for request.
+    todo: Used with retry decorator to account for connectivity problems of
+    the Copernicus hub
+
+    Parameters:
+    -----------
+    date: pd.Timestamp
+        Date for whiche product should be retrieved.
+    bbox: shapely.geometry.Polygon
+        Shape of Bounding box around area of interest.
+    platform: str
+        Platform for which to retrieve the products. Default: "Sentinel-2".
+    producttype: str
+        Product type (processing level) for the data. Default: "S2MSI1C".
+    cloudcov_min_pct: float or None
+        Minimum cloud cover for the required scene. Default: None (get value
+        from params.cfg).
+    cloudcov_max_pct: float or None
+        Maximum cloud cover for the required scene. Default: None (get value
+        from params.cfg).
+
+    Returns:
+    --------
+    products: sentinelsat.Products
+        Ordered Dict of products available for request
+    api:
+        api of Copernicus Hub with sentinelsat
+    """
+
+    if cloudcov_min_pct is None:
+        cloudcov_min_pct = cfg.PARAMS['cloudcov_min_pct']
+    if cloudcov_max_pct is None:
+        cloudcov_max_pct = cfg.PARAMS['cloudcov_max_pct']
+
+    api = setup_sentinel_api()
+
+    products = api.query(area=bbox,
+                        date=date,
+                        platformname=platform,
+                        producttype=producttype,
+                        cloudcoverpercentage="[{} TO {}]".format(
+                                cloudcov_min_pct,
+                                cloudcov_max_pct))
+
+    return products, api
+
 
 def unzip_sentinel(path: Optional[str] = None, remove_zip: bool = True):
     """
@@ -343,7 +399,7 @@ def unzip_sentinel(path: Optional[str] = None, remove_zip: bool = True):
     This function either takes the path to a file or to an entire directory.
     Raises warnings, when "bad zip files" are encountered, which was once a
     server side issue.
-    
+
     Parameters
     ----------
     path : str, optional
