@@ -3,7 +3,7 @@ from sentinelsat import SentinelAPI
 from configobj import ConfigObj, ConfigObjError
 import zipfile
 import shapely
-from shapely.topology import TopologicalError
+from shapely.errors import TopologicalError
 import salem
 import pandas as pd
 import geopandas as gpd

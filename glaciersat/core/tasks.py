@@ -6,7 +6,7 @@ import salem
 import pandas as pd
 import geopandas as gpd
 import xarray as xr
-from shapely.topology import TopologicalError
+from shapely.errors import TopologicalError
 from glaciersat.core import imagery, gis, snowlines
 from glaciersat.core.imagery import SatelliteImage, S2Image, LandsatImage, \
     SatelliteImageMeta
