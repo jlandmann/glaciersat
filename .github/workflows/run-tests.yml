@@ -35,12 +35,10 @@ jobs:
              poetry install --with=dev
       - name: Activate environment and run coverage
         run: |
-             if [ "$RUNNER_OS" == "Linux" ]; then
-              source $(poetry env info --path)/bin/activate
-             if [ "$RUNNER_OS" == "macOS" ]; then
-              source $(poetry env info --path)/bin/activate
-             elif [ "$RUNNER_OS" == "Windows" ]; then
-              source $(poetry env info --path)/Scripts/activate
+             if [ "$RUNNER_OS" != "Windows" ]; then
+                 source $(poetry env info --path)/bin/activate
+             else
+                 source $(poetry env info --path)/Scripts/activate
              fi
              poetry run coverage
       - name: Test
