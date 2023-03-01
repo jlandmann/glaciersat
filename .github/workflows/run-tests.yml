@@ -34,8 +34,14 @@ jobs:
              poetry update python=${{ matrix.python-version }}
              poetry install --with=dev
              source $(poetry env info --path)/bin/activate
+             poetry run coverage
+             python coverage
+             python -m coverage
       - name: Test
         run: |
+          poetry env info
+          source $(poetry env info --path)/bin/activate
+          poetry env info
           python -m coverage erase
           python -m coverage run --source=./glaciersat --parallel-mode --module pytest --verbose glaciersat
           python -m coverage combine
