@@ -37,9 +37,6 @@ jobs:
              poetry run coverage
       - name: Test
         run: |
-          poetry env info
-          source $(poetry env info --path)/bin/activate
-          poetry env info
           poetry run coverage erase
           poetry run coverage run --source=./glaciersat --parallel-mode --module pytest --verbose glaciersat
           poetry run coverage combine
@@ -54,6 +51,7 @@ jobs:
           COVERALLS_SERVICE_NAME: github
           COVERALLS_PARALLEL: true
         run: |
+          poetry remove coverage  # poetry cannot resolve both
           poetry add coveralls
           poetry run coveralls
   finish-coveralls:
