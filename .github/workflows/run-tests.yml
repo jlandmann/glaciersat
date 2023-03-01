@@ -34,11 +34,11 @@ jobs:
              poetry update python=${{ matrix.python-version }}
              poetry install --with=dev
       - name: Activate environment Unix and run coverage
-        if: ${{ (${{ matrix.os }} == "ubuntu-latest") || (${{ matrix.os }} == "macos-latest") }}
+        if: (${{ matrix.os }} == "ubuntu-latest") || (${{ matrix.os }} == "macos-latest")
         run: source $(poetry env info --path)/bin/activate
              poetry run coverage
       - name: Activate environment Windows and run coverage
-        if: ${{ ${{ matrix.os }} == "windows-latest" }}
+        if: ${{ matrix.os }} == "windows-latest"
         run: source $(poetry env info --path)/Scripts/activate
              poetry run coverage
       - name: Test
