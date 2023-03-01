@@ -53,7 +53,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COVERALLS_SERVICE_NAME: github
           COVERALLS_PARALLEL: true
-        run: poetry run coveralls
+        run: |
+          poetry add coveralls
+          poetry run coveralls
   finish-coveralls:
     name: Coveralls Finished
     needs: test
