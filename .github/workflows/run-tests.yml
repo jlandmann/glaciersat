@@ -35,18 +35,16 @@ jobs:
              poetry install --with=dev
              source $(poetry env info --path)/bin/activate
              poetry run coverage
-             python coverage
-             python -m coverage
       - name: Test
         run: |
           poetry env info
           source $(poetry env info --path)/bin/activate
           poetry env info
-          python -m coverage erase
-          python -m coverage run --source=./glaciersat --parallel-mode --module pytest --verbose glaciersat
-          python -m coverage combine
-          python -m coverage xml
-          python -m coverage report --skip-covered
+          poetry run coverage erase
+          poetry run coverage run --source=./glaciersat --parallel-mode --module pytest --verbose glaciersat
+          poetry run coverage combine
+          poetry run coverage xml
+          poetry run coverage report --skip-covered
         env:
           MPLBACKEND: agg
           COVERAGE_RCFILE: ${{ github.workspace }}/.coveragerc
